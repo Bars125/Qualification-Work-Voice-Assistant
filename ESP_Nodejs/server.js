@@ -2,9 +2,12 @@ var fs = require("file-system");
 const http = require("http");
 const server = http.createServer();
 const fileName = "./resources/recording.wav";
-const axios = require('axios');
 const config  = require('./config');
 const apiKey = config.apiKey;
+
+//import OpenAI from "openai"; -> const OpenAI = require("openai")
+const OpenAI = require("openai")
+const openai = new OpenAI();
 
 server.on("request", (request, response) => {
 	if (request.method == "POST" && request.url === "/uploadAudio") {
@@ -63,19 +66,25 @@ async function speechToTextAPI() {
 
 async function callGPT(text) {
     try {
-        const response = await axios.post('https://api.openai.com/v1/completions', {
-            model: 'gpt-3.5-turbo',
-            prompt: text,
-            max_tokens: 50,
-            temperature: 0.7
+        // Requet message
+        const message = {
+            role: "system",
+            content: text
+        };
+
+        // API-request
+        const completion = await openai.chat.completions.create({
+            messages: [message],
+            model: "gpt-3.5-turbo",
         }, {
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': apiKey 
+                'Authorization': apiKey
             }
         });
 
-        console.log('ChatGPT:', response.data.choices[0].text.trim());
+		console.log('ChatGPT:', completion.choices[0].message.content);
+
     } catch (error) {
         console.error('Error calling GPT:', error.response.data);
     }
