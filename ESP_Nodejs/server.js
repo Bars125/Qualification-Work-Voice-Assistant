@@ -5,9 +5,11 @@ const fileName = "./resources/recording.wav";
 const config  = require('./config');
 const apiKey = config.apiKey;
 
-//import OpenAI from "openai"; -> const OpenAI = require("openai")
-const OpenAI = require("openai")
+//OpenAi import OpenAI from "openai"; -> const OpenAI = require("openai")
+const OpenAI = require("openai");
 const openai = new OpenAI();
+const path = require("path")
+const speechFile = path.resolve("./resources/voicedby.wav");
 
 server.on("request", (request, response) => {
 	if (request.method == "POST" && request.url === "/uploadAudio") {
@@ -22,7 +24,7 @@ server.on("request", (request, response) => {
             response.writeHead(200, { "Content-Type": "text/plain" });
             response.end(transcription);
 
-            // Отправка текста на API GPT-3.5 Turbo
+            // Sending transcripted text to API GPT-3.5 Turbo
             callGPT(transcription);
 		});
 	} else {
@@ -83,11 +85,26 @@ async function callGPT(text) {
             }
         });
 
-		console.log('ChatGPT:', completion.choices[0].message.content);
+		const gptResponse = completion.choices[0].message.content;
+		console.log('ChatGPT:', gptResponse);
+
+		// test to speech funch
+		GptResponsetoSpeech(gptResponse); 
 
     } catch (error) {
         console.error('Error calling GPT:', error.response.data);
     }
+}
+
+async function GptResponsetoSpeech(gptResponse){
+	const mp3 = await openai.audio.speech.create({
+		model: "tts-1",
+		voice: "echo",
+		input: gptResponse,
+	  });
+	  //console.log(speechFile); //path to saved audio file
+	  const buffer = Buffer.from(await mp3.arrayBuffer());
+	  await fs.promises.writeFile(speechFile, buffer);
 }
 
 const port = 8888;
