@@ -1,17 +1,19 @@
+//Variables
 var fs = require("file-system");
 const http = require("http");
-const server = http.createServer();
+const server_upload = http.createServer();
+const server_download = http.createServer();
 const fileName = "./resources/recording.wav";
 const config  = require('./config');
 const apiKey = config.apiKey;
 
-//OpenAi import OpenAI from "openai"; -> const OpenAI = require("openai")
+//OpenAi 
 const OpenAI = require("openai");
 const openai = new OpenAI();
 const path = require("path")
 const speechFile = path.resolve("./resources/voicedby.wav");
 
-server.on("request", (request, response) => {
+server_upload.on("request", (request, response) => {
 	if (request.method == "POST" && request.url === "/uploadAudio") {
 		var recordingFile = fs.createWriteStream(fileName, { encoding: "utf8" });
 		request.on("data", function(data) {
@@ -23,7 +25,6 @@ server.on("request", (request, response) => {
             const transcription = await speechToTextAPI();
             response.writeHead(200, { "Content-Type": "text/plain" });
             response.end(transcription);
-
             // Sending transcripted text to API GPT-3.5 Turbo
             callGPT(transcription);
 		});
@@ -32,6 +33,21 @@ server.on("request", (request, response) => {
 		response.writeHead(405, { "Content-Type": "text/plain" });
 	}
 });
+
+server_download.on("request", (request, response) => {
+    const filePath = 'resources/voicedby.wav';
+    const stat = fs.statSync(filePath);
+
+    response.writeHead(200, {
+        'Content-Type': 'audio/wav',
+        'Content-Length': stat.size
+    });
+
+    const readStream = fs.createReadStream(filePath);
+    readStream.pipe(response);
+	server_upload.close();
+});
+
 
 async function speechToTextAPI() {
 	// Imports the Google Cloud client library
@@ -88,7 +104,7 @@ async function callGPT(text) {
 		const gptResponse = completion.choices[0].message.content;
 		console.log('ChatGPT:', gptResponse);
 
-		// test to speech funch
+		// test to speech function
 		GptResponsetoSpeech(gptResponse); 
 
     } catch (error) {
@@ -107,6 +123,10 @@ async function GptResponsetoSpeech(gptResponse){
 	  await fs.promises.writeFile(speechFile, buffer);
 }
 
-const port = 8888;
-server.listen(port);
-console.log(`Listening at ${port}`);
+server_upload.listen(8888, () => {
+    console.log('Upload Server is listening on port 8888');
+});
+
+server_download.listen(8899, () => {
+    console.log('Download Server is listening on port 8899');
+});

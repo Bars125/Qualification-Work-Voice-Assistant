@@ -17,8 +17,10 @@
 
 File file;
 const char filename[] = "/recording.wav";
+const char audioResponse[] = "/voicedby.wav";
 const int headerSize = 44;
 bool isWIFIConnected;
+const char* serverUrl = "http://192.168.0.15:8899/resources/voicedby.wav";
 
 void uploadFile();
 void SPIFFSInit();
@@ -26,18 +28,20 @@ void i2s_adc(void* arg);
 void listSPIFFS(void);
 void wifiConnect(void* pvParameters);
 void listSPIFFS(void);
-void i2sInit();
+void i2sInitINMP441();
 void wavHeader(byte* header, int wavSize);
+void downloadFile();
 
 //  DEBUG ZONE
 void checkFileLock(const char* filename);
 void format_Spiffs();
 void printSpaceInfo();
+void listFiles();
 
 void setup() {
   Serial.begin(115200);
   SPIFFSInit();
-  i2sInit();
+  i2sInitINMP441();
   xTaskCreate(i2s_adc, "i2s_adc", 4096, NULL, 1, NULL);
   delay(500);
   xTaskCreate(wifiConnect, "wifi_Connect", 4096, NULL, 0, NULL);
@@ -52,9 +56,9 @@ void SPIFFSInit() {
     while (1) yield();
   }
 
-  checkFileLock(filename);
   SPIFFS.remove(filename);
-  file = SPIFFS.open(filename, FILE_WRITE);
+  SPIFFS.remove(audioResponse);
+  file = SPIFFS.open(filename, "w"); // changed form FILE_WRITE
   if (!file) {
     Serial.println("File is not available!");
   }
@@ -66,7 +70,7 @@ void SPIFFSInit() {
   listSPIFFS();
 }
 
-void i2sInit() {
+void i2sInitINMP441() {
   i2s_config_t i2s_config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
     .sample_rate = I2S_SAMPLE_RATE,
@@ -136,6 +140,7 @@ void i2s_adc(void* arg) {
 
   if (isWIFIConnected) {
     uploadFile();
+    downloadFile();
   }
 
   vTaskDelete(NULL);
@@ -294,10 +299,55 @@ void uploadFile() {
   //format_Spiffs();
 }
 
+void downloadFile(){
+  // Send HTTP request to server to get the audio file
+  HTTPClient http;
+  http.begin(serverUrl);
+  int httpResponseCode = http.GET();
+
+  if (httpResponseCode > 0) {
+    if (httpResponseCode == HTTP_CODE_OK) {
+      File file = SPIFFS.open("/voicedby.wav", "w");
+      if (!file) {
+        Serial.println("Failed to open file for writing");
+        return;
+      }
+
+      WiFiClient *stream = http.getStreamPtr();
+      while (stream->available()) {
+        file.write(stream->read());
+      }
+
+      file.close();
+      Serial.println("File downloaded and saved to SPIFFS successfully");
+      //CHECK IF FILES ARE THERE
+      listFiles();
+      printSpaceInfo();
+    } else {
+      Serial.print("HTTP request failed with error code: ");
+      Serial.println(httpResponseCode);
+    }
+  } else {
+    Serial.println("Failed to connect to server");
+  }
+
+  http.end();
+}
+
 // ---------------------DEBUG TESTING ZONE------------------------
 // ---------------------DEBUG TESTING ZONE------------------------
 // ---------------------DEBUG TESTING ZONE------------------------
 
+void listFiles() {
+  Serial.println("Listing files:");
+  File root = SPIFFS.open("/");
+  File file = root.openNextFile();
+  while(file){
+    Serial.print("  FILE: ");
+    Serial.println(file.name());
+    file = root.openNextFile();
+  }
+}
 
 void format_Spiffs(){
   if (SPIFFS.format()) {
