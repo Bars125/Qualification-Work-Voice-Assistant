@@ -2,11 +2,19 @@
 #include <SPIFFS.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <Audio.h>
 #include "config.h"
 
+// INMP441
 #define I2S_WS 15
 #define I2S_SD 4
 #define I2S_SCK 2
+
+// MAX98357A
+#define I2S_DOUT 26
+#define I2S_BCLK 27
+#define I2S_LRC 14
+
 #define I2S_PORT I2S_NUM_0
 #define I2S_SAMPLE_RATE (16000)
 #define I2S_SAMPLE_BITS (16)
@@ -16,8 +24,8 @@
 #define FLASH_RECORD_SIZE (I2S_CHANNEL_NUM * I2S_SAMPLE_RATE * I2S_SAMPLE_BITS / 8 * RECORD_TIME)
 
 File file;
-const char filename[] = "/recording.wav";
-const char audioResponse[] = "/voicedby.wav";
+const char audioRecordfile[] = "/recording.wav";
+const char audioResponsefile[] = "/voicedby.wav";
 const int headerSize = 44;
 bool isWIFIConnected;
 const char* serverUrl = "http://192.168.0.15:8899/resources/voicedby.wav";
@@ -31,9 +39,10 @@ void listSPIFFS(void);
 void i2sInitINMP441();
 void wavHeader(byte* header, int wavSize);
 void downloadFile();
+void speakerI2SOutput();
 
 //  DEBUG ZONE
-void checkFileLock(const char* filename);
+void checkFileLock(const char* filenamecheck);
 void format_Spiffs();
 void printSpaceInfo();
 void listFiles();
@@ -56,9 +65,9 @@ void SPIFFSInit() {
     while (1) yield();
   }
 
-  SPIFFS.remove(filename);
-  SPIFFS.remove(audioResponse);
-  file = SPIFFS.open(filename, "w"); // changed form FILE_WRITE
+  SPIFFS.remove(audioRecordfile);
+  SPIFFS.remove(audioResponsefile);
+  file = SPIFFS.open(audioRecordfile, "w"); // changed form FILE_WRITE
   if (!file) {
     Serial.println("File is not available!");
   }
@@ -141,6 +150,7 @@ void i2s_adc(void* arg) {
   if (isWIFIConnected) {
     uploadFile();
     downloadFile();
+    //speakerI2SOutput();
   }
 
   vTaskDelete(NULL);
@@ -269,7 +279,7 @@ void wifiConnect(void* pvParameters) {
 }
 
 void uploadFile() {
-  file = SPIFFS.open(filename, FILE_READ);
+  file = SPIFFS.open(audioRecordfile, FILE_READ);
   if (!file) {
     Serial.println("FILE IS NOT AVAILABLE!");
     return;
@@ -307,7 +317,7 @@ void downloadFile(){
 
   if (httpResponseCode > 0) {
     if (httpResponseCode == HTTP_CODE_OK) {
-      File file = SPIFFS.open("/voicedby.wav", "w");
+      file = SPIFFS.open(audioResponsefile, "w");
       if (!file) {
         Serial.println("Failed to open file for writing");
         return;
@@ -332,6 +342,35 @@ void downloadFile(){
   }
 
   http.end();
+}
+
+// PARTIALLY WORKS
+void speakerI2SOutput(){
+  // Create Audio objectAudio audio;
+  Audio audio;
+  // File path variable
+  const char* filePath = "/voicedby.wav";
+  // Setup I2S
+  audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+
+  // Set Volume
+  audio.setVolume(5);
+
+  // Open music file from SPIFFS
+  file = SPIFFS.open(filePath, FILE_READ);
+  if (!file) {
+    Serial.println("Error opening file");
+    return;
+  }
+
+  // Connect audio to file in SPIFFS
+  audio.connecttoFS(SPIFFS, filePath);
+
+  // Playing Audio
+  audio.loop();   
+
+  // Close the file
+  file.close();
 }
 
 // ---------------------DEBUG TESTING ZONE------------------------
@@ -370,8 +409,8 @@ void printSpaceInfo() {
   Serial.println(freeBytes);
 }
 
-void checkFileLock(const char* filename) {
-  File testFile = SPIFFS.open(filename, "w");
+void checkFileLock(const char* filenamecheck) {
+  File testFile = SPIFFS.open(filenamecheck, "w");
   if (testFile) {
     Serial.println("File is accessible. Closing...");
     testFile.close();
