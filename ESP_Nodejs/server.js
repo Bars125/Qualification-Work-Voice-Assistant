@@ -48,7 +48,6 @@ server_download.on("request", (request, response) => {
 	server_upload.close();
 });
 
-
 async function speechToTextAPI() {
 	// Imports the Google Cloud client library
 	const speech = require("@google-cloud/speech");
@@ -113,13 +112,13 @@ async function callGPT(text) {
 }
 
 async function GptResponsetoSpeech(gptResponse){
-	const mp3 = await openai.audio.speech.create({
+	const wav = await openai.audio.speech.create({
 		model: "tts-1",
 		voice: "echo",
 		input: gptResponse,
 	  });
 	  //console.log(speechFile); //path to saved audio file
-	  const buffer = Buffer.from(await mp3.arrayBuffer());
+	  const buffer = Buffer.from(await wav.arrayBuffer());
 	  await fs.promises.writeFile(speechFile, buffer);
 }
 
