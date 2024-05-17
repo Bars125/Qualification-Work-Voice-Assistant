@@ -35,15 +35,14 @@ server_upload.on("request", (request, response) => {
 });
 
 server_download.on("request", (request, response) => {
-    const filePath = 'resources/voicedby.wav';
-    const stat = fs.statSync(filePath);
+    const stat = fs.statSync(speechFile);
 
     response.writeHead(200, {
         'Content-Type': 'audio/wav',
         'Content-Length': stat.size
     });
 
-    const readStream = fs.createReadStream(filePath);
+    const readStream = fs.createReadStream(speechFile);
     readStream.pipe(response);
 	server_upload.close();
 });

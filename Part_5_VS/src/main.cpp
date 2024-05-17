@@ -1,32 +1,35 @@
+// Libraries
 #include <driver/i2s.h>
 #include <SPIFFS.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-// #include <Audio.h>
 #include "config.h"
 
+// RTOS Ticks Delay
 #define TickDelay(ms) vTaskDelay(pdMS_TO_TICKS(ms))
 
-// INMP441
+// INMP441 Ports
 #define I2S_WS 15
 #define I2S_SD 4
 #define I2S_SCK 2
 
-// MAX98357A
+// MAX98357A Ports
 #define I2S_DOUT 26
 #define I2S_BCLK 27
 #define I2S_LRC 14
 
-#define MAX_I2S_SAMPLE_RATE (24000)
-#define MAX_I2S_SAMPLE_BITS (16)
+// MAX98357A I2S Setup
 #define MAX_I2S_NUM I2S_NUM_1
+#define MAX_I2S_SAMPLE_RATE (12000)
+#define MAX_I2S_SAMPLE_BITS (16)
 #define MAX_I2S_READ_LEN (1024)
 
+// INMP441 I2S Setup
 #define I2S_PORT I2S_NUM_0
 #define I2S_SAMPLE_RATE (16000)
 #define I2S_SAMPLE_BITS (16)
 #define I2S_READ_LEN (16 * 1024)
-#define RECORD_TIME (5) // Seconds
+#define RECORD_TIME (5)           // Seconds
 #define I2S_CHANNEL_NUM (1)
 #define FLASH_RECORD_SIZE (I2S_CHANNEL_NUM * I2S_SAMPLE_RATE * I2S_SAMPLE_BITS / 8 * RECORD_TIME)
 
@@ -35,9 +38,12 @@ SemaphoreHandle_t i2sFinishedSemaphore;
 const char audioRecordfile[] = "/recording.wav";
 const char audioResponsefile[] = "/voicedby.wav";
 const int headerSize = 44;
+
 bool isWIFIConnected;
-const char *serverUrl = "http://192.168.0.15:8899/resources/voicedby.wav";
 bool voicedFilesavedonPC = false;
+
+// Node Js server Adress
+const char *serverUrl = "http://192.168.0.15:8899/resources/voicedby.wav";
 
 // Prototypes
 void uploadFile();
@@ -52,7 +58,6 @@ void downloadFile(void *arg);
 void speakerI2SOutput();
 void semaphoreWait(void *arg);
 void i2sInitMax98357A();
-// void outputAudiolib();
 
 //  DEBUG ZONE
 void checkFileLock(const char *filenamecheck);
@@ -355,7 +360,6 @@ void uploadFile()
   client.end();
   // DEBUG
   printSpaceInfo();
-  // format_Spiffs();
   voicedFilesavedonPC = true;
 }
 
@@ -420,6 +424,8 @@ void downloadFile(void *arg)
   // sound output
   i2sInitMax98357A();
   speakerI2SOutput();
+
+  vTaskDelete(NULL);
 }
 
 void i2sInitMax98357A()
@@ -445,14 +451,14 @@ void i2sInitMax98357A()
 
   i2s_set_pin(MAX_I2S_NUM, &pin_config);
 
-}
-
-void speakerI2SOutput()
-{
   // Set ADC sampling frequency to X kHz
   adc1_config_width(ADC_WIDTH_12Bit);
   adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_6db);
 
+}
+
+void speakerI2SOutput()
+{
   Serial.printf("Playing file: %s\n", audioResponsefile); // audioResponsefile  audioRecordfile
 
   file = SPIFFS.open(audioResponsefile, FILE_READ);
@@ -461,7 +467,7 @@ void speakerI2SOutput()
     Serial.println("Failed to open file for reading");
     return;
   }
-
+  
   size_t bytesRead = 0;
   uint8_t buffer[MAX_I2S_READ_LEN];
 
@@ -473,7 +479,7 @@ void speakerI2SOutput()
       Serial.println("Error reading from file");
       break;
     }
-    // i2s_write(MAX_I2S_NUM, buffer, ((bits+8)/16)*SAMPLE_PER_CYCLE*4, &i2s_bytes_write, 100);
+
     i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, bytesRead, &bytesRead, portMAX_DELAY);
   }
 
@@ -482,10 +488,6 @@ void speakerI2SOutput()
   file.close();
   vTaskDelete(NULL);
 }
-
-// ---------------------DEBUG TESTING ZONE------------------------
-// ---------------------DEBUG TESTING ZONE------------------------
-// ---------------------DEBUG TESTING ZONE------------------------
 
 void listFiles()
 {
@@ -497,18 +499,6 @@ void listFiles()
     Serial.print("  FILE: ");
     Serial.println(file.name());
     file = root.openNextFile();
-  }
-}
-
-void format_Spiffs()
-{
-  if (SPIFFS.format())
-  {
-    Serial.println("SPIFFS formatted successfully");
-  }
-  else
-  {
-    Serial.println("Error formatting SPIFFS");
   }
 }
 
@@ -526,47 +516,16 @@ void printSpaceInfo()
   Serial.println(freeBytes);
 }
 
-void checkFileLock(const char *filenamecheck)
+// ---------------------DEBUG TESTING ZONE------------------------
+
+void format_Spiffs()
 {
-  File testFile = SPIFFS.open(filenamecheck, "w");
-  if (testFile)
+  if (SPIFFS.format())
   {
-    Serial.println("File is accessible. Closing...");
-    testFile.close();
+    Serial.println("SPIFFS formatted successfully");
   }
   else
   {
-    Serial.println("Error opening file or file is locked.");
+    Serial.println("Error formatting SPIFFS");
   }
 }
-
-/*
-void outputAudiolib()
-{
-  // Create Audio objectAudio audio;
-  Audio audio;
-
-  // Setup I2S
-  audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-
-  // Set Volume
-  audio.setVolume(10);
-
-  // Open music file from SPIFFS
-  file = SPIFFS.open(audioRecordfile, FILE_READ);
-  if (!file)
-  {
-    Serial.println("Error opening file");
-    return;
-  }
-
-  // Connect audio to file in SPIFFS
-  audio.connecttoFS(SPIFFS, audioRecordfile);
-
-  // Playing Audio
-  audio.loop();
-
-  // Close the file
-  file.close();
-}
-*/
