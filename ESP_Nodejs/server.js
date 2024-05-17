@@ -116,6 +116,7 @@ async function GptResponsetoSpeech(gptResponse){
 		model: "tts-1",
 		voice: "echo",
 		input: gptResponse,
+		response_format: "wav",
 	  });
 	  //console.log(speechFile); //path to saved audio file
 	  const buffer = Buffer.from(await wav.arrayBuffer());

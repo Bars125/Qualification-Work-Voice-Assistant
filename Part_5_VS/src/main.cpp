@@ -2,7 +2,7 @@
 #include <SPIFFS.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <Audio.h>
+// #include <Audio.h>
 #include "config.h"
 
 #define TickDelay(ms) vTaskDelay(pdMS_TO_TICKS(ms))
@@ -26,7 +26,7 @@
 #define I2S_SAMPLE_RATE (16000)
 #define I2S_SAMPLE_BITS (16)
 #define I2S_READ_LEN (16 * 1024)
-#define RECORD_TIME (10) // Seconds
+#define RECORD_TIME (5) // Seconds
 #define I2S_CHANNEL_NUM (1)
 #define FLASH_RECORD_SIZE (I2S_CHANNEL_NUM * I2S_SAMPLE_RATE * I2S_SAMPLE_BITS / 8 * RECORD_TIME)
 
@@ -52,7 +52,7 @@ void downloadFile(void *arg);
 void speakerI2SOutput();
 void semaphoreWait(void *arg);
 void i2sInitMax98357A();
-void outputAudiolib();
+// void outputAudiolib();
 
 //  DEBUG ZONE
 void checkFileLock(const char *filenamecheck);
@@ -86,9 +86,9 @@ void SPIFFSInit()
     while (1)
       yield();
   }
-  format_Spiffs();
-  // SPIFFS.remove(audioRecordfile);
-  // SPIFFS.remove(audioResponsefile);
+  //format_Spiffs();
+  SPIFFS.remove(audioRecordfile);
+  SPIFFS.remove(audioResponsefile);
   file = SPIFFS.open(audioRecordfile, FILE_WRITE);
   if (!file)
   {
@@ -365,6 +365,7 @@ void semaphoreWait(void *arg)
   {
     if (xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE && voicedFilesavedonPC == true)
     { // Если семафор доступен
+      TickDelay(500); // DELETE
       Serial.println("Starting downloadFile ");
       xTaskCreate(downloadFile, "downloadFile", 4096, NULL, 2, NULL);
       break;
@@ -423,34 +424,34 @@ void downloadFile(void *arg)
 
 void i2sInitMax98357A()
 {
-  i2s_config_t i2s_config_tx = {
+  static const i2s_config_t i2s_config = {
       .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_TX),
-      .sample_rate = I2S_SAMPLE_RATE,
-      .bits_per_sample = i2s_bits_per_sample_t(I2S_SAMPLE_BITS),
-      .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-      .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
-      .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = 32,
-      .dma_buf_len = 64};
+      .sample_rate = MAX_I2S_SAMPLE_RATE,
+      .bits_per_sample = i2s_bits_per_sample_t(MAX_I2S_SAMPLE_BITS),
+      .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+      .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+      .intr_alloc_flags = 0, // default interrupt priority
+      .dma_buf_count = 8,
+      .dma_buf_len = 64,
+      .use_apll = false};
 
-  i2s_pin_config_t pin_config_tx = {
+  i2s_driver_install(MAX_I2S_NUM, &i2s_config, 0, NULL);
+
+  static const i2s_pin_config_t pin_config = {
       .bck_io_num = I2S_BCLK,
       .ws_io_num = I2S_LRC,
       .data_out_num = I2S_DOUT,
       .data_in_num = I2S_PIN_NO_CHANGE};
 
-  // i2s_driver_install(I2S_PORT, &i2s_config_tx, 0, NULL);
-  // i2s_set_pin(I2S_PORT, &pin_config_tx);
+  i2s_set_pin(MAX_I2S_NUM, &pin_config);
 
-  i2s_driver_install((i2s_port_t)MAX_I2S_NUM, &i2s_config_tx, 0, NULL);
-  i2s_set_pin((i2s_port_t)MAX_I2S_NUM, &pin_config_tx);
 }
 
 void speakerI2SOutput()
 {
   // Set ADC sampling frequency to X kHz
-  //adc1_config_width(ADC_WIDTH_12Bit);
-  //adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_11db);
+  adc1_config_width(ADC_WIDTH_12Bit);
+  adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_6db);
 
   Serial.printf("Playing file: %s\n", audioResponsefile); // audioResponsefile  audioRecordfile
 
@@ -477,6 +478,7 @@ void speakerI2SOutput()
   }
 
   Serial.println("Audio has been played.");
+
   file.close();
   vTaskDelete(NULL);
 }
@@ -538,6 +540,7 @@ void checkFileLock(const char *filenamecheck)
   }
 }
 
+/*
 void outputAudiolib()
 {
   // Create Audio objectAudio audio;
@@ -566,3 +569,4 @@ void outputAudiolib()
   // Close the file
   file.close();
 }
+*/
