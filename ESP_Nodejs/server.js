@@ -35,19 +35,17 @@ server_upload.on("request", (request, response) => {
 });
 
 server_download.on("request", (request, response) => {
-    const filePath = 'resources/voicedby.wav';
-    const stat = fs.statSync(filePath);
+    const stat = fs.statSync(speechFile);
 
     response.writeHead(200, {
         'Content-Type': 'audio/wav',
         'Content-Length': stat.size
     });
 
-    const readStream = fs.createReadStream(filePath);
+    const readStream = fs.createReadStream(speechFile);
     readStream.pipe(response);
 	server_upload.close();
 });
-
 
 async function speechToTextAPI() {
 	// Imports the Google Cloud client library
@@ -113,13 +111,14 @@ async function callGPT(text) {
 }
 
 async function GptResponsetoSpeech(gptResponse){
-	const mp3 = await openai.audio.speech.create({
+	const wav = await openai.audio.speech.create({
 		model: "tts-1",
 		voice: "echo",
 		input: gptResponse,
+		response_format: "wav",
 	  });
 	  //console.log(speechFile); //path to saved audio file
-	  const buffer = Buffer.from(await mp3.arrayBuffer());
+	  const buffer = Buffer.from(await wav.arrayBuffer());
 	  await fs.promises.writeFile(speechFile, buffer);
 }
 
