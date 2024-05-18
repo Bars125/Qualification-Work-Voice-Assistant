@@ -60,7 +60,6 @@ void semaphoreWait(void *arg);
 void i2sInitMax98357A();
 
 //  DEBUG ZONE
-void checkFileLock(const char *filenamecheck);
 void format_Spiffs();
 void printSpaceInfo();
 void listFiles();
@@ -68,8 +67,10 @@ void listFiles();
 void setup()
 {
   Serial.begin(115200);
+  TickDelay(500);
   SPIFFSInit();
   i2sInitINMP441();
+
   i2sFinishedSemaphore = xSemaphoreCreateBinary();
   xTaskCreate(i2s_adc, "i2s_adc", 4096, NULL, 2, NULL);
   TickDelay(500);
@@ -91,9 +92,15 @@ void SPIFFSInit()
     while (1)
       yield();
   }
+
   //format_Spiffs();
-  SPIFFS.remove(audioRecordfile);
-  SPIFFS.remove(audioResponsefile);
+  if (SPIFFS.exists(audioRecordfile)){
+      SPIFFS.remove(audioRecordfile);
+  }
+  if (SPIFFS.exists(audioResponsefile)) {
+    SPIFFS.remove(audioResponsefile);
+  }
+
   file = SPIFFS.open(audioRecordfile, FILE_WRITE);
   if (!file)
   {
@@ -161,7 +168,7 @@ void i2s_adc(void *arg)
   {
     // read data from I2S bus, in this case, from ADC.
     i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
-    // example_disp_buf((uint8_t*) i2s_read_buff, 64);
+
     // save original data from I2S(ADC) into flash.
     i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, i2s_read_len);
     file.write((const byte *)flash_write_buff, i2s_read_len);
@@ -185,20 +192,6 @@ void i2s_adc(void *arg)
 
   xSemaphoreGive(i2sFinishedSemaphore); // После завершения задачи i2s_adc отдаем семафор
   vTaskDelete(NULL);
-}
-
-void example_disp_buf(uint8_t *buf, int length)
-{
-  printf("======\n");
-  for (int i = 0; i < length; i++)
-  {
-    printf("%02x ", buf[i]);
-    if ((i + 1) % 8 == 0)
-    {
-      printf("\n");
-    }
-  }
-  printf("======\n");
 }
 
 void wavHeader(byte *header, int wavSize)
@@ -307,7 +300,7 @@ void listSPIFFS(void)
 
   Serial.println(FPSTR(line));
   Serial.println();
-  delay(1000);
+  TickDelay(1000);
 }
 
 void wifiConnect(void *pvParameters)
@@ -369,7 +362,6 @@ void semaphoreWait(void *arg)
   {
     if (xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE && voicedFilesavedonPC == true)
     { // Если семафор доступен
-      TickDelay(500); // DELETE
       Serial.println("Starting downloadFile ");
       xTaskCreate(downloadFile, "downloadFile", 4096, NULL, 2, NULL);
       break;
@@ -486,7 +478,6 @@ void speakerI2SOutput()
   Serial.println("Audio has been played.");
 
   file.close();
-  vTaskDelete(NULL);
 }
 
 void listFiles()
