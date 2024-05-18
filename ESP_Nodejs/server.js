@@ -1,17 +1,18 @@
-//Variables
+// Modules connection
 var fs = require("file-system");
 const http = require("http");
+const path = require("path");
+const OpenAI = require("openai");
+// Variables, objects
 const server_upload = http.createServer();
 const server_download = http.createServer();
-const fileName = "./resources/recording.wav";
+const fileName = path.resolve("./resources/recording.wav");
+const speechFile = path.resolve("./resources/voicedby.wav");
+// ApiKey config
 const config  = require('./config');
 const apiKey = config.apiKey;
-
-//OpenAi 
-const OpenAI = require("openai");
+// OpenAi 
 const openai = new OpenAI();
-const path = require("path")
-const speechFile = path.resolve("./resources/voicedby.wav");
 
 server_upload.on("request", (request, response) => {
 	if (request.method == "POST" && request.url === "/uploadAudio") {
