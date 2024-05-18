@@ -71,6 +71,8 @@ void setup()
   SPIFFSInit();
   i2sInitINMP441();
 
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 1);
+
   i2sFinishedSemaphore = xSemaphoreCreateBinary();
   xTaskCreate(i2s_adc, "i2s_adc", 4096, NULL, 2, NULL);
   TickDelay(500);
@@ -413,11 +415,15 @@ void downloadFile(void *arg)
   }
 
   http.end();
-  // sound output
+
+  // Audio init output
   i2sInitMax98357A();
   speakerI2SOutput();
 
-  vTaskDelete(NULL);
+  // Going to sleep
+  Serial.println("Going to sleep");
+  esp_deep_sleep_start();
+  vTaskDelete(NULL); // in case deepsleepfunc doesn't work properly
 }
 
 void i2sInitMax98357A()
