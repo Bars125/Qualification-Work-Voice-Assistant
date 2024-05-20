@@ -8,6 +8,7 @@ const server_upload = http.createServer();
 const server_download = http.createServer();
 const fileName = path.resolve("./resources/recording.wav");
 const speechFile = path.resolve("./resources/voicedby.wav");
+var shouldDownloadFile = false;
 // ApiKey config
 const config  = require('./config');
 const apiKey = config.apiKey;
@@ -93,6 +94,7 @@ async function callGPT(text) {
         const completion = await openai.chat.completions.create({
             messages: [message],
             model: "gpt-3.5-turbo",
+			max_tokens: 30
         }, {
             headers: {
                 'Content-Type': 'application/json',
@@ -121,6 +123,8 @@ async function GptResponsetoSpeech(gptResponse){
 	  //console.log(speechFile); //path to saved audio file
 	  const buffer = Buffer.from(await wav.arrayBuffer());
 	  await fs.promises.writeFile(speechFile, buffer);
+	  // console.log("Audiofile is successfully saved:", speechFile);
+	  shouldDownloadFile == true;
 }
 
 server_upload.listen(8888, () => {

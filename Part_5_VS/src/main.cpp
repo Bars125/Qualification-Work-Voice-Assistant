@@ -3,6 +3,7 @@
 #include <SPIFFS.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WebSocketsClient.h>
 #include "config.h"
 
 // RTOS Ticks Delay
@@ -18,6 +19,10 @@
 #define I2S_BCLK 27
 #define I2S_LRC 14
 
+// LED Ports
+#define isWifiConnected 25
+#define isAudioRecording 32
+
 // MAX98357A I2S Setup
 #define MAX_I2S_NUM I2S_NUM_1
 #define MAX_I2S_SAMPLE_RATE (12000)
@@ -29,7 +34,7 @@
 #define I2S_SAMPLE_RATE (16000)
 #define I2S_SAMPLE_BITS (16)
 #define I2S_READ_LEN (16 * 1024)
-#define RECORD_TIME (5)           // Seconds
+#define RECORD_TIME (5) // Seconds
 #define I2S_CHANNEL_NUM (1)
 #define FLASH_RECORD_SIZE (I2S_CHANNEL_NUM * I2S_SAMPLE_RATE * I2S_SAMPLE_BITS / 8 * RECORD_TIME)
 
@@ -46,20 +51,19 @@ bool voicedFilesavedonPC = false;
 const char *serverUrl = "http://192.168.0.15:8899/resources/voicedby.wav";
 
 // Prototypes
-void uploadFile();
 void SPIFFSInit();
-void i2s_adc(void *arg);
-void listSPIFFS(void);
-void wifiConnect(void *pvParameters);
 void listSPIFFS(void);
 void i2sInitINMP441();
 void wavHeader(byte *header, int wavSize);
+void i2s_adc(void *arg);
+void wifiConnect(void *pvParameters);
+void semaphoreWait(void *arg);
+void uploadFile();
+void i2sInitMax98357A();
 void downloadFile(void *arg);
 void speakerI2SOutput();
-void semaphoreWait(void *arg);
-void i2sInitMax98357A();
 
-//  DEBUG ZONE
+//  Service Func
 void format_Spiffs();
 void printSpaceInfo();
 void listFiles();
@@ -68,11 +72,14 @@ void setup()
 {
   Serial.begin(115200);
   TickDelay(500);
-  SPIFFSInit();
-  i2sInitINMP441();
-
+  pinMode(isWifiConnected, OUTPUT);
+  digitalWrite(isWifiConnected, LOW);
+  pinMode(isAudioRecording, OUTPUT);
+  digitalWrite(isAudioRecording, LOW);
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 1);
 
+  SPIFFSInit();
+  i2sInitINMP441();
   i2sFinishedSemaphore = xSemaphoreCreateBinary();
   xTaskCreate(i2s_adc, "i2s_adc", 4096, NULL, 2, NULL);
   TickDelay(500);
@@ -95,11 +102,13 @@ void SPIFFSInit()
       yield();
   }
 
-  //format_Spiffs();
-  if (SPIFFS.exists(audioRecordfile)){
-      SPIFFS.remove(audioRecordfile);
+  // format_Spiffs();
+  if (SPIFFS.exists(audioRecordfile))
+  {
+    SPIFFS.remove(audioRecordfile);
   }
-  if (SPIFFS.exists(audioResponsefile)) {
+  if (SPIFFS.exists(audioResponsefile))
+  {
     SPIFFS.remove(audioResponsefile);
   }
 
@@ -165,6 +174,7 @@ void i2s_adc(void *arg)
   i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
   i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
 
+  digitalWrite(isAudioRecording, HIGH);
   Serial.println(" *** Recording Start *** ");
   while (flash_wr_size < FLASH_RECORD_SIZE)
   {
@@ -179,6 +189,8 @@ void i2s_adc(void *arg)
     ets_printf("Never Used Stack Size: %u\n", uxTaskGetStackHighWaterMark(NULL));
   }
   file.close();
+
+  digitalWrite(isAudioRecording, LOW);
 
   free(i2s_read_buff);
   i2s_read_buff = NULL;
@@ -310,12 +322,18 @@ void wifiConnect(void *pvParameters)
   isWIFIConnected = false;
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    digitalWrite(isWifiConnected, LOW);
+  }
   while (WiFi.status() != WL_CONNECTED)
   {
     vTaskDelay(500);
     Serial.print(".");
   }
   isWIFIConnected = true;
+  digitalWrite(isWifiConnected, HIGH);
   while (true)
   {
     vTaskDelay(1000);
@@ -402,6 +420,9 @@ void downloadFile(void *arg)
       Serial.println("File downloaded and saved to SPIFFS successfully");
       // CHECK IF FILES ARE THERE
       listFiles();
+      // Audio init output
+      i2sInitMax98357A();
+      speakerI2SOutput();
     }
     else
     {
@@ -415,10 +436,6 @@ void downloadFile(void *arg)
   }
 
   http.end();
-
-  // Audio init output
-  i2sInitMax98357A();
-  speakerI2SOutput();
 
   // Going to sleep
   Serial.println("Going to sleep");
@@ -452,12 +469,11 @@ void i2sInitMax98357A()
   // Set ADC sampling frequency to X kHz
   adc1_config_width(ADC_WIDTH_12Bit);
   adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_6db);
-
 }
 
 void speakerI2SOutput()
 {
-  Serial.printf("Playing file: %s\n", audioResponsefile); // audioResponsefile  audioRecordfile
+  Serial.printf("Playing file: %s\n", audioResponsefile);
 
   file = SPIFFS.open(audioResponsefile, FILE_READ);
   if (!file)
@@ -465,23 +481,40 @@ void speakerI2SOutput()
     Serial.println("Failed to open file for reading");
     return;
   }
-  
-  size_t bytesRead = 0;
+
+  size_t totalBytesRead = 0;    // Общее количество байтов в файле
+  size_t totalBytesWritten = 0; // Общее количество байтов, записанных через I2S
   uint8_t buffer[MAX_I2S_READ_LEN];
 
   while (file.available())
   {
-    bytesRead = file.read(buffer, sizeof(buffer));
+    size_t bytesRead = file.read(buffer, sizeof(buffer));
     if (bytesRead <= 0)
     {
       Serial.println("Error reading from file");
       break;
     }
 
-    i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, bytesRead, &bytesRead, portMAX_DELAY);
+    totalBytesRead += bytesRead; // Обновляем общее количество прочитанных байтов
+    size_t bytesWritten;
+    i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
+    totalBytesWritten += bytesWritten; // Обновляем общее количество записанных байтов
+
+    if (bytesWritten != bytesRead)
+    {
+      Serial.println("Error writing to I2S");
+      break;
+    }
   }
 
-  Serial.println("Audio has been played.");
+  if (totalBytesRead == totalBytesWritten)
+  {
+    Serial.println("Audio has been played completely.");
+  }
+  else
+  {
+    Serial.println("Audio playback incomplete.");
+  }
 
   file.close();
 }
