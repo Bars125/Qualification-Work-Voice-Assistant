@@ -47,8 +47,10 @@ const int headerSize = 44;
 bool isWIFIConnected;
 bool voicedFilesavedonPC = false;
 
-// Node Js server Adress
-const char *serverUrl = "http://192.168.0.15:8899/resources/voicedby.wav";
+// Node Js server Adresses
+const char *serverUploadUrl = "http://192.168.0.15:3000/uploadAudio";
+const char *serverDownloadUrl = "http://192.168.0.15:3000/downloadAudio";
+const char *checkDownloadUrl = "http://192.168.0.15:3000/checkVariable";
 
 // Prototypes
 void SPIFFSInit();
@@ -352,7 +354,7 @@ void uploadFile()
   Serial.println("===> Upload FILE to Node.js Server");
 
   HTTPClient client;
-  client.begin("http://192.168.0.15:8888/uploadAudio");
+  client.begin(serverUploadUrl);
   client.addHeader("Content-Type", "audio/wav");
   int httpResponseCode = client.sendRequest("POST", &file, file.size());
   Serial.print("httpResponseCode : ");
@@ -373,21 +375,36 @@ void uploadFile()
   client.end();
   // DEBUG
   printSpaceInfo();
-  voicedFilesavedonPC = true;
+  // voicedFilesavedonPC = true; false made
 }
 
 void semaphoreWait(void *arg)
 {
+  HTTPClient http;
   while (true)
   {
-    if (xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE && voicedFilesavedonPC == true)
-    { // Если семафор доступен
-      Serial.println("Starting downloadFile ");
-      xTaskCreate(downloadFile, "downloadFile", 4096, NULL, 2, NULL);
-      break;
+    http.begin("http://192.168.0.15:3000/checkVariable");
+    int httpResponseCode = http.GET();
+
+    if (httpResponseCode > 0)
+    {
+      String payload = http.getString();
+      //Serial.println("Payload Value- "+ payload);
+      if (payload == "true" && xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE)
+      { // Если семафор доступен
+        Serial.println("Starting downloadFile ");
+        xTaskCreate(downloadFile, "downloadFile", 4096, NULL, 2, NULL);
+        http.end();
+        break;
+      }
     }
+    else
+    {
+      Serial.print("HTTP request failed with error code: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();
     vTaskDelay(500);
-    // Serial.print("-");
   }
   vTaskDelete(NULL);
 }
@@ -396,14 +413,14 @@ void downloadFile(void *arg)
 {
   // Send HTTP request to server to get the audio file
   HTTPClient http;
-  http.begin(serverUrl);
+  http.begin(serverDownloadUrl);
   int httpResponseCode = http.GET();
 
   if (httpResponseCode > 0)
   {
     if (httpResponseCode == HTTP_CODE_OK)
     {
-      file = SPIFFS.open(audioResponsefile, "w");
+      file = SPIFFS.open(audioResponsefile, FILE_WRITE);
       if (!file)
       {
         Serial.println("Failed to open file for writing");
