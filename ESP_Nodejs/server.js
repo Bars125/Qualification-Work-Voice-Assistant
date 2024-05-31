@@ -47,16 +47,56 @@ app.get('/checkVariable', (req, res) => {
 
 // Обработчик для загрузки файла
 app.get('/downloadAudio', (req, res) => {
+	//const filePath = path.join(__dirname, 'audio', 'audiofile.wav'); // Укажите путь к вашему аудиофайлу
+
 	const stat = fs.statSync(speechFile);
+	const fileSize = stat.size;
+	const range = req.headers.range;
 
-	res.writeHead(200, {
-		'Content-Type': 'audio/wav',
-		'Content-Length': stat.size
-	});
+	if (range) {
+		console.log("RANGE!");
+		const parts = range.replace(/bytes=/, "").split("-");
+		const start = parseInt(parts[0], 10);
+		const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
-	const readStream = fs.createReadStream(speechFile);
-	readStream.pipe(res);
+		if (start >= fileSize) {
+			res.status(416).send('Requested range not satisfiable\n' + start + ' >= ' + fileSize);
+			return;
+		}
+
+		const chunksize = (end - start) + 1;
+		const file = fs.createReadStream(speechFile, { start, end });
+		const head = {
+			'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+			'Accept-Ranges': 'bytes',
+			'Content-Length': chunksize,
+			'Content-Type': 'audio/wav',
+		};
+
+		res.writeHead(206, head);
+		file.pipe(res);
+
+		// Закрываем соединение после отправки файла
+		file.on('close', () => {
+			res.end();
+		});
+	} else {
+		console.log("NOT RANGE!");
+		const head = {
+			'Content-Length': fileSize,
+			'Content-Type': 'audio/wav',
+		};
+		res.writeHead(200, head);
+		fs.createReadStream(speechFile).pipe(res);
+
+		// Закрываем соединение после отправки файла
+		res.on('finish', () => {
+			res.end();
+			console.log("conn finished!");
+		});
+	}
 });
+
 
 // Запуск сервера
 app.listen(port, () => {
@@ -66,7 +106,7 @@ app.listen(port, () => {
 async function speechToTextAPI() {
 	// Imports the Google Cloud client library
 	const speech = require("@google-cloud/speech");
-	
+
 	// Creates a client
 	const client = new speech.SpeechClient();
 
@@ -136,6 +176,6 @@ async function GptResponsetoSpeech(gptResponse) {
 	//console.log(speechFile); //path to saved audio file
 	const buffer = Buffer.from(await wav.arrayBuffer());
 	await fs.promises.writeFile(speechFile, buffer);
-	//console.log("Audiofile is successfully saved:", speechFile);
+	console.log("Audiofile is successfully saved:", speechFile);
 	shouldDownloadFile = true;
 }
