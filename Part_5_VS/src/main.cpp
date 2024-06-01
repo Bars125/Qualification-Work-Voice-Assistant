@@ -22,7 +22,7 @@
 #define Button_Pin GPIO_NUM_33
 
 // LED Ports
-#define isWifiConnected 25
+#define isWifiConnectedPin 25
 #define isAudioRecording 32
 
 // MAX98357A I2S Setup
@@ -47,7 +47,7 @@ const char audioResponsefile[] = "/voicedby.wav";
 const int headerSize = 44;
 
 bool isWIFIConnected;
-bool voicedFilesavedonPC = false;
+bool audioIsUploaded = false;
 
 // Node Js server Adresses
 const char *serverUploadUrl = "http://192.168.0.15:3000/uploadAudio";
@@ -65,6 +65,7 @@ void semaphoreWait(void *arg);
 void uploadFile();
 void i2sInitMax98357A();
 void downloadFile(void *arg);
+void monitorMemory();
 
 //  Service Func
 // void format_Spiffs();
@@ -81,8 +82,8 @@ void setup()
 
   Serial.begin(115200);
   TickDelay(500);
-  pinMode(isWifiConnected, OUTPUT);
-  digitalWrite(isWifiConnected, LOW);
+  pinMode(isWifiConnectedPin, OUTPUT);
+  digitalWrite(isWifiConnectedPin, LOW);
   pinMode(isAudioRecording, OUTPUT);
   digitalWrite(isAudioRecording, LOW);
 
@@ -98,7 +99,6 @@ void setup()
 
 void loop()
 {
-  // nothing
 }
 
 void SPIFFSInit()
@@ -196,6 +196,7 @@ void i2s_adc(void *arg)
     ets_printf("Sound recording %u%%\n", flash_wr_size * 100 / FLASH_RECORD_SIZE);
     ets_printf("Never Used Stack Size: %u\n", uxTaskGetStackHighWaterMark(NULL));
   }
+
   file.close();
 
   digitalWrite(isAudioRecording, LOW);
@@ -212,6 +213,7 @@ void i2s_adc(void *arg)
     uploadFile();
   }
 
+  audioIsUploaded = true;
   xSemaphoreGive(i2sFinishedSemaphore); // После завершения задачи i2s_adc отдаем семафор
   vTaskDelete(NULL);
 }
@@ -333,7 +335,7 @@ void wifiConnect(void *pvParameters)
 
   if (WiFi.status() != WL_CONNECTED)
   {
-    digitalWrite(isWifiConnected, LOW);
+    digitalWrite(isWifiConnectedPin, LOW);
   }
   while (WiFi.status() != WL_CONNECTED)
   {
@@ -341,7 +343,7 @@ void wifiConnect(void *pvParameters)
     Serial.print(".");
   }
   isWIFIConnected = true;
-  digitalWrite(isWifiConnected, HIGH);
+  digitalWrite(isWifiConnectedPin, HIGH);
   while (true)
   {
     vTaskDelay(1000);
@@ -384,7 +386,6 @@ void uploadFile()
   i2s_driver_uninstall(I2S_NUM_0);
   // DEBUG
   printSpaceInfo();
-  // voicedFilesavedonPC = true; false made
 }
 
 void semaphoreWait(void *arg)
@@ -392,31 +393,36 @@ void semaphoreWait(void *arg)
   HTTPClient http;
   while (true)
   {
-    http.begin("http://192.168.0.15:3000/checkVariable");
-    int httpResponseCode = http.GET();
-
-    if (httpResponseCode > 0)
+    if (audioIsUploaded && isWIFIConnected)
     {
-      String payload = http.getString();
-      // Serial.println("Payload Value- "+ payload);
-      if (payload == "true" && xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE)
-      { // Если семафор доступен
-        Serial.println("Starting downloadFile ");
-        TickDelay(100);
-        xTaskCreate(downloadFile, "downloadFile", 6144, NULL, 2, NULL);
-        http.end();
-        break;
+      http.begin("http://192.168.0.15:3000/checkVariable");
+      int httpResponseCode = http.GET();
+      if (httpResponseCode > 0)
+      {
+        String payload = http.getString();
+        // Serial.println("Payload Value- "+ payload);
+        if (payload == "true" && xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE)
+        { // Если семафор доступен
+          Serial.println("Starting downloadFile ");
+          TickDelay(100);
+          xTaskCreate(downloadFile, "downloadFile", 4096, NULL, 2, NULL);
+          http.end();
+          break;
+        }
       }
+      else
+      {
+        Serial.print("HTTP request failed with error code: ");
+        Serial.println(httpResponseCode);
+      }
+      http.end();
     }
     else
     {
-      Serial.print("HTTP request failed with error code: ");
-      Serial.println(httpResponseCode);
+      vTaskDelay(500);
     }
-    http.end();
-    vTaskDelay(500);
   }
-  //Serial.println("Semaphore task deleted!"); Checked. Works as planned.
+  // Serial.println("Semaphore task deleted!"); Checked. Works as planned.
   vTaskDelete(NULL);
 }
 
@@ -453,7 +459,8 @@ void downloadFile(void *arg)
     }
 
     // Очищаем буферы
-    //memset(buffer, 0, sizeof(buffer));
+    Serial.println("clear buff memset");
+    memset(buffer, 0, sizeof(buffer));
 
     // Вывод уведомления о завершении воспроизведения, если все байты прочитаны
     if (totalBytesRead == http.getSize())
@@ -507,19 +514,6 @@ void i2sInitMax98357A()
   i2s_zero_dma_buffer(MAX_I2S_NUM);
 }
 
-// void listFiles()
-// {
-//   Serial.println("Listing files:");
-//   File root = SPIFFS.open("/");
-//   File file = root.openNextFile();
-//   while (file)
-//   {
-//     Serial.print("  FILE: ");
-//     Serial.println(file.name());
-//     file = root.openNextFile();
-//   }
-// }
-
 void printSpaceInfo()
 {
   size_t totalBytes = SPIFFS.totalBytes();
@@ -534,16 +528,10 @@ void printSpaceInfo()
   Serial.println(freeBytes);
 }
 
-// ---------------------DEBUG TESTING ZONE------------------------
-
-// void format_Spiffs()
-// {
-//   if (SPIFFS.format())
-//   {
-//     Serial.println("SPIFFS formatted successfully");
-//   }
-//   else
-//   {
-//     Serial.println("Error formatting SPIFFS");
-//   }
-// }
+void monitorMemory()
+{
+  UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+  Serial.printf("High water mark (minimum free stack) of this task: %u bytes\n", uxHighWaterMark);
+  Serial.printf("Free heap size: %u bytes\n", xPortGetFreeHeapSize());
+  Serial.printf("Minimum free heap size ever: %u bytes\n", xPortGetMinimumEverFreeHeapSize());
+}

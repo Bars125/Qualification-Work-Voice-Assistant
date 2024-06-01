@@ -87,16 +87,21 @@ app.get('/downloadAudio', (req, res) => {
 			'Content-Type': 'audio/wav',
 		};
 		res.writeHead(200, head);
-		fs.createReadStream(speechFile).pipe(res);
+		const fileStream = fs.createReadStream(speechFile);
+
+		fileStream.pipe(res);
 
 		// Закрываем соединение после отправки файла
-		res.on('finish', () => {
+		fileStream.on('end', () => {
 			res.end();
-			console.log("conn finished!");
+		});
+
+		fileStream.on('error', (err) => {
+			console.error('Error reading file:', err);
+			res.status(500).end();
 		});
 	}
 });
-
 
 // Запуск сервера
 app.listen(port, () => {
