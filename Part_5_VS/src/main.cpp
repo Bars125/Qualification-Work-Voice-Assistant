@@ -29,7 +29,7 @@
 #define MAX_I2S_NUM I2S_NUM_1
 #define MAX_I2S_SAMPLE_RATE (12000)
 #define MAX_I2S_SAMPLE_BITS (16)
-#define MAX_I2S_READ_LEN (1024)
+#define MAX_I2S_READ_LEN (256)
 
 // INMP441 I2S Setup
 #define I2S_PORT I2S_NUM_0
@@ -47,7 +47,6 @@ const char audioResponsefile[] = "/voicedby.wav";
 const int headerSize = 44;
 
 bool isWIFIConnected;
-bool audioIsUploaded = false;
 
 // Node Js server Adresses
 const char *serverUploadUrl = "http://192.168.0.15:3000/uploadAudio";
@@ -65,12 +64,7 @@ void semaphoreWait(void *arg);
 void uploadFile();
 void i2sInitMax98357A();
 void broadcastAudio(void *arg);
-void monitorMemory();
 void printSpaceInfo();
-
-//  Service Func
-// void format_Spiffs();
-// void listFiles();
 
 void setup()
 {
@@ -213,7 +207,6 @@ void i2s_adc(void *arg)
     uploadFile();
   }
 
-  audioIsUploaded = true;
   xSemaphoreGive(i2sFinishedSemaphore); // После завершения задачи i2s_adc отдаем семафор
   vTaskDelete(NULL);
 }
@@ -391,19 +384,26 @@ void semaphoreWait(void *arg)
   HTTPClient http;
   while (true)
   {
-    if (audioIsUploaded && isWIFIConnected)
+    if (xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE)
     {
       http.begin(broadcastPermitionUrl);
       int httpResponseCode = http.GET();
+
       if (httpResponseCode > 0)
       {
         String payload = http.getString();
-        // Serial.println("Payload Value- "+ payload);
-        if (payload == "true" && xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE)
+        //Serial.println("Payload Value- " + payload);
+
+        if (payload.indexOf("\"ready\":true") > -1)
         {
+          Serial.println("Recieving confirmed! Start broadcasting...");
           xTaskCreate(broadcastAudio, "broadcastAudio", 4096, NULL, 2, NULL);
           http.end();
           break;
+        }
+        else
+        {
+          Serial.println("Waiting for broadcast confirmation from Server...");
         }
       }
       else
@@ -411,14 +411,12 @@ void semaphoreWait(void *arg)
         Serial.print("HTTP request failed with error code: ");
         Serial.println(httpResponseCode);
       }
+      xSemaphoreGive(i2sFinishedSemaphore);
       http.end();
     }
-    else
-    {
-      vTaskDelay(500);
-    }
+    vTaskDelay(500);
   }
-  // Serial.println("Semaphore task deleted!"); Checked. Works as planned.
+
   vTaskDelete(NULL);
 }
 
@@ -437,7 +435,7 @@ void broadcastAudio(void *arg)
     uint8_t buffer[MAX_I2S_READ_LEN];
 
     Serial.println("Starting broadcastAudio ");
-    while (stream->connected() || stream->available())
+    while (stream->connected() && stream->available()) // CHANGED FROM ||
     {
       int len = stream->read(buffer, sizeof(buffer));
       if (len > 0)
@@ -502,12 +500,4 @@ void printSpaceInfo()
   Serial.println(usedBytes);
   Serial.print("Free space: ");
   Serial.println(freeBytes);
-}
-
-void monitorMemory()
-{
-  UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
-  Serial.printf("High water mark (minimum free stack) of this task: %u bytes\n", uxHighWaterMark);
-  Serial.printf("Free heap size: %u bytes\n", xPortGetFreeHeapSize());
-  Serial.printf("Minimum free heap size ever: %u bytes\n", xPortGetMinimumEverFreeHeapSize());
 }

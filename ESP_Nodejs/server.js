@@ -25,6 +25,7 @@ app.use(express.json());
 
 // Обработчик для загрузки аудио файла
 app.post('/uploadAudio', (req, res) => {
+	shouldDownloadFile = false;
 	var recordingFile = fs.createWriteStream(fileName, { encoding: "utf8" });
 
 	req.on("data", function (data) {
@@ -42,7 +43,7 @@ app.post('/uploadAudio', (req, res) => {
 
 // Обработчик для проверки значения переменной
 app.get('/checkVariable', (req, res) => {
-	res.send(shouldDownloadFile ? "true" : "false");
+	res.json({ ready: shouldDownloadFile });
 });
 
 // Обработчик для загрузки файла
@@ -63,7 +64,7 @@ app.get('/broadcastAudio', (req, res) => {
 
 		const readStream = fs.createReadStream(speechFile);
 		readStream.pipe(res);
-		
+
 		readStream.on('end', () => {
 			console.log('File has been sent successfully');
 		});
@@ -144,15 +145,20 @@ async function callGPT(text) {
 }
 
 async function GptResponsetoSpeech(gptResponse) {
-	const wav = await openai.audio.speech.create({
-		model: "tts-1",
-		voice: "echo",
-		input: gptResponse,
-		response_format: "wav",
-	});
-	//console.log(speechFile); //path to saved audio file
-	const buffer = Buffer.from(await wav.arrayBuffer());
-	await fs.promises.writeFile(speechFile, buffer);
-	console.log("Audiofile is successfully saved:", speechFile);
-	shouldDownloadFile = true;
+	try {
+		const wav = await openai.audio.speech.create({
+			model: "tts-1",
+			voice: "echo",
+			input: gptResponse,
+			response_format: "wav",
+		});
+
+		const buffer = Buffer.from(await wav.arrayBuffer());
+		await fs.promises.writeFile(speechFile, buffer);
+
+		//console.log("Audio file is successfully saved:", speechFile);
+		shouldDownloadFile = true;
+	} catch (error) {
+		console.error("Error saving audio file:", error);
+	}
 }
