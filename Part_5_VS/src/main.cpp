@@ -3,7 +3,6 @@
 #include <SPIFFS.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <WebSocketsClient.h>
 #include "config.h"
 
 // RTOS Ticks Delay
@@ -19,8 +18,11 @@
 #define I2S_BCLK 27
 #define I2S_LRC 14
 
+// Wake-up Button
+#define Button_Pin GPIO_NUM_33
+
 // LED Ports
-#define isWifiConnected 25
+#define isWifiConnectedPin 25
 #define isAudioRecording 32
 
 // MAX98357A I2S Setup
@@ -45,12 +47,12 @@ const char audioResponsefile[] = "/voicedby.wav";
 const int headerSize = 44;
 
 bool isWIFIConnected;
-bool voicedFilesavedonPC = false;
+bool audioIsUploaded = false;
 
 // Node Js server Adresses
 const char *serverUploadUrl = "http://192.168.0.15:3000/uploadAudio";
-const char *serverDownloadUrl = "http://192.168.0.15:3000/downloadAudio";
-const char *checkDownloadUrl = "http://192.168.0.15:3000/checkVariable";
+const char *serverBroadcastUrl = "http://192.168.0.15:3000/broadcastAudio";
+const char *broadcastPermitionUrl = "http://192.168.0.15:3000/checkVariable";
 
 // Prototypes
 void SPIFFSInit();
@@ -62,23 +64,28 @@ void wifiConnect(void *pvParameters);
 void semaphoreWait(void *arg);
 void uploadFile();
 void i2sInitMax98357A();
-void downloadFile(void *arg);
-void speakerI2SOutput();
+void broadcastAudio(void *arg);
+void monitorMemory();
+void printSpaceInfo();
 
 //  Service Func
-void format_Spiffs();
-void printSpaceInfo();
-void listFiles();
+// void format_Spiffs();
+// void listFiles();
 
 void setup()
 {
+  esp_sleep_enable_ext0_wakeup(Button_Pin, 1);
+  if (digitalRead(Button_Pin) == LOW)
+  {
+    esp_deep_sleep_start();
+  }
+
   Serial.begin(115200);
   TickDelay(500);
-  pinMode(isWifiConnected, OUTPUT);
-  digitalWrite(isWifiConnected, LOW);
+  pinMode(isWifiConnectedPin, OUTPUT);
+  digitalWrite(isWifiConnectedPin, LOW);
   pinMode(isAudioRecording, OUTPUT);
   digitalWrite(isAudioRecording, LOW);
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 1);
 
   SPIFFSInit();
   i2sInitINMP441();
@@ -87,12 +94,11 @@ void setup()
   TickDelay(500);
   xTaskCreate(wifiConnect, "wifi_Connect", 2048, NULL, 1, NULL);
   TickDelay(500);
-  xTaskCreate(semaphoreWait, "semaphoreWait", 4096, NULL, 0, NULL);
+  xTaskCreate(semaphoreWait, "semaphoreWait", 2048, NULL, 0, NULL);
 }
 
 void loop()
 {
-  // nothing
 }
 
 void SPIFFSInit()
@@ -190,6 +196,7 @@ void i2s_adc(void *arg)
     ets_printf("Sound recording %u%%\n", flash_wr_size * 100 / FLASH_RECORD_SIZE);
     ets_printf("Never Used Stack Size: %u\n", uxTaskGetStackHighWaterMark(NULL));
   }
+
   file.close();
 
   digitalWrite(isAudioRecording, LOW);
@@ -206,6 +213,7 @@ void i2s_adc(void *arg)
     uploadFile();
   }
 
+  audioIsUploaded = true;
   xSemaphoreGive(i2sFinishedSemaphore); // После завершения задачи i2s_adc отдаем семафор
   vTaskDelete(NULL);
 }
@@ -327,7 +335,7 @@ void wifiConnect(void *pvParameters)
 
   if (WiFi.status() != WL_CONNECTED)
   {
-    digitalWrite(isWifiConnected, LOW);
+    digitalWrite(isWifiConnectedPin, LOW);
   }
   while (WiFi.status() != WL_CONNECTED)
   {
@@ -335,7 +343,7 @@ void wifiConnect(void *pvParameters)
     Serial.print(".");
   }
   isWIFIConnected = true;
-  digitalWrite(isWifiConnected, HIGH);
+  digitalWrite(isWifiConnectedPin, HIGH);
   while (true)
   {
     vTaskDelay(1000);
@@ -373,9 +381,9 @@ void uploadFile()
   }
   file.close();
   client.end();
-  // DEBUG
-  printSpaceInfo();
-  // voicedFilesavedonPC = true; false made
+
+  // Освобождение I2S ресурсов
+  i2s_driver_uninstall(I2S_NUM_0);
 }
 
 void semaphoreWait(void *arg)
@@ -383,76 +391,72 @@ void semaphoreWait(void *arg)
   HTTPClient http;
   while (true)
   {
-    http.begin("http://192.168.0.15:3000/checkVariable");
-    int httpResponseCode = http.GET();
-
-    if (httpResponseCode > 0)
+    if (audioIsUploaded && isWIFIConnected)
     {
-      String payload = http.getString();
-      //Serial.println("Payload Value- "+ payload);
-      if (payload == "true" && xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE)
-      { // Если семафор доступен
-        Serial.println("Starting downloadFile ");
-        xTaskCreate(downloadFile, "downloadFile", 4096, NULL, 2, NULL);
-        http.end();
-        break;
+      http.begin(broadcastPermitionUrl);
+      int httpResponseCode = http.GET();
+      if (httpResponseCode > 0)
+      {
+        String payload = http.getString();
+        // Serial.println("Payload Value- "+ payload);
+        if (payload == "true" && xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE)
+        {
+          xTaskCreate(broadcastAudio, "broadcastAudio", 4096, NULL, 2, NULL);
+          http.end();
+          break;
+        }
       }
+      else
+      {
+        Serial.print("HTTP request failed with error code: ");
+        Serial.println(httpResponseCode);
+      }
+      http.end();
     }
     else
     {
-      Serial.print("HTTP request failed with error code: ");
-      Serial.println(httpResponseCode);
+      vTaskDelay(500);
     }
-    http.end();
-    vTaskDelay(500);
   }
+  // Serial.println("Semaphore task deleted!"); Checked. Works as planned.
   vTaskDelete(NULL);
 }
 
-void downloadFile(void *arg)
+void broadcastAudio(void *arg)
 {
-  // Send HTTP request to server to get the audio file
+  // Initialisation first
+  i2sInitMax98357A();
+
   HTTPClient http;
-  http.begin(serverDownloadUrl);
-  int httpResponseCode = http.GET();
+  http.begin(serverBroadcastUrl);
 
-  if (httpResponseCode > 0)
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK)
   {
-    if (httpResponseCode == HTTP_CODE_OK)
-    {
-      file = SPIFFS.open(audioResponsefile, FILE_WRITE);
-      if (!file)
-      {
-        Serial.println("Failed to open file for writing");
-        return;
-      }
+    WiFiClient *stream = http.getStreamPtr();
+    uint8_t buffer[MAX_I2S_READ_LEN];
 
-      WiFiClient *stream = http.getStreamPtr();
-      while (stream->available())
-      {
-        file.write(stream->read());
-      }
-
-      file.close();
-      Serial.println("File downloaded and saved to SPIFFS successfully");
-      // CHECK IF FILES ARE THERE
-      listFiles();
-      // Audio init output
-      i2sInitMax98357A();
-      speakerI2SOutput();
-    }
-    else
+    Serial.println("Starting broadcastAudio ");
+    while (stream->connected() || stream->available())
     {
-      Serial.print("HTTP request failed with error code: ");
-      Serial.println(httpResponseCode);
+      int len = stream->read(buffer, sizeof(buffer));
+      if (len > 0)
+      {
+        size_t bytes_written;
+        i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
+      }
     }
+    Serial.println("Audio playback completed");
   }
   else
   {
-    Serial.println("Failed to connect to server");
+    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
 
   http.end();
+
+  // Освобождение I2S ресурсов
+  i2s_driver_uninstall(MAX_I2S_NUM);
 
   // Going to sleep
   Serial.println("Going to sleep");
@@ -462,91 +466,28 @@ void downloadFile(void *arg)
 
 void i2sInitMax98357A()
 {
-  static const i2s_config_t i2s_config = {
-      .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_TX),
-      .sample_rate = MAX_I2S_SAMPLE_RATE,
-      .bits_per_sample = i2s_bits_per_sample_t(MAX_I2S_SAMPLE_BITS),
+  i2s_config_t i2s_config = {
+      .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+      .sample_rate = 12000,
+      .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-      .intr_alloc_flags = 0, // default interrupt priority
+      .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
       .dma_buf_count = 8,
-      .dma_buf_len = 64,
-      .use_apll = false};
+      .dma_buf_len = MAX_I2S_READ_LEN,
+      .use_apll = false,
+      .tx_desc_auto_clear = true,
+      .fixed_mclk = 0};
 
-  i2s_driver_install(MAX_I2S_NUM, &i2s_config, 0, NULL);
-
-  static const i2s_pin_config_t pin_config = {
+  i2s_pin_config_t pin_config = {
       .bck_io_num = I2S_BCLK,
       .ws_io_num = I2S_LRC,
       .data_out_num = I2S_DOUT,
       .data_in_num = I2S_PIN_NO_CHANGE};
 
+  i2s_driver_install(MAX_I2S_NUM, &i2s_config, 0, NULL);
   i2s_set_pin(MAX_I2S_NUM, &pin_config);
-
-  // Set ADC sampling frequency to X kHz
-  adc1_config_width(ADC_WIDTH_12Bit);
-  adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_6db);
-}
-
-void speakerI2SOutput()
-{
-  Serial.printf("Playing file: %s\n", audioResponsefile);
-
-  file = SPIFFS.open(audioResponsefile, FILE_READ);
-  if (!file)
-  {
-    Serial.println("Failed to open file for reading");
-    return;
-  }
-
-  size_t totalBytesRead = 0;    // Общее количество байтов в файле
-  size_t totalBytesWritten = 0; // Общее количество байтов, записанных через I2S
-  uint8_t buffer[MAX_I2S_READ_LEN];
-
-  while (file.available())
-  {
-    size_t bytesRead = file.read(buffer, sizeof(buffer));
-    if (bytesRead <= 0)
-    {
-      Serial.println("Error reading from file");
-      break;
-    }
-
-    totalBytesRead += bytesRead; // Обновляем общее количество прочитанных байтов
-    size_t bytesWritten;
-    i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
-    totalBytesWritten += bytesWritten; // Обновляем общее количество записанных байтов
-
-    if (bytesWritten != bytesRead)
-    {
-      Serial.println("Error writing to I2S");
-      break;
-    }
-  }
-
-  if (totalBytesRead == totalBytesWritten)
-  {
-    Serial.println("Audio has been played completely.");
-  }
-  else
-  {
-    Serial.println("Audio playback incomplete.");
-  }
-
-  file.close();
-}
-
-void listFiles()
-{
-  Serial.println("Listing files:");
-  File root = SPIFFS.open("/");
-  File file = root.openNextFile();
-  while (file)
-  {
-    Serial.print("  FILE: ");
-    Serial.println(file.name());
-    file = root.openNextFile();
-  }
+  i2s_zero_dma_buffer(MAX_I2S_NUM);
 }
 
 void printSpaceInfo()
@@ -563,16 +504,10 @@ void printSpaceInfo()
   Serial.println(freeBytes);
 }
 
-// ---------------------DEBUG TESTING ZONE------------------------
-
-void format_Spiffs()
+void monitorMemory()
 {
-  if (SPIFFS.format())
-  {
-    Serial.println("SPIFFS formatted successfully");
-  }
-  else
-  {
-    Serial.println("Error formatting SPIFFS");
-  }
+  UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+  Serial.printf("High water mark (minimum free stack) of this task: %u bytes\n", uxHighWaterMark);
+  Serial.printf("Free heap size: %u bytes\n", xPortGetFreeHeapSize());
+  Serial.printf("Minimum free heap size ever: %u bytes\n", xPortGetMinimumEverFreeHeapSize());
 }

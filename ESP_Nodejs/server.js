@@ -46,16 +46,33 @@ app.get('/checkVariable', (req, res) => {
 });
 
 // Обработчик для загрузки файла
-app.get('/downloadAudio', (req, res) => {
-	const stat = fs.statSync(speechFile);
+app.get('/broadcastAudio', (req, res) => {
+	//const filePath = path.join(__dirname, 'your_audio_file.wav');
 
-	res.writeHead(200, {
-		'Content-Type': 'audio/wav',
-		'Content-Length': stat.size
+	fs.stat(speechFile, (err, stats) => {
+		if (err) {
+			console.error('File not found');
+			res.sendStatus(404);
+			return;
+		}
+
+		res.writeHead(200, {
+			'Content-Type': 'audio/wav',
+			'Content-Length': stats.size
+		});
+
+		const readStream = fs.createReadStream(speechFile);
+		readStream.pipe(res);
+		
+		readStream.on('end', () => {
+			console.log('File has been sent successfully');
+		});
+
+		readStream.on('error', (err) => {
+			console.error('Error reading file', err);
+			res.sendStatus(500);
+		});
 	});
-
-	const readStream = fs.createReadStream(speechFile);
-	readStream.pipe(res);
 });
 
 // Запуск сервера
@@ -66,7 +83,7 @@ app.listen(port, () => {
 async function speechToTextAPI() {
 	// Imports the Google Cloud client library
 	const speech = require("@google-cloud/speech");
-	
+
 	// Creates a client
 	const client = new speech.SpeechClient();
 
@@ -136,6 +153,6 @@ async function GptResponsetoSpeech(gptResponse) {
 	//console.log(speechFile); //path to saved audio file
 	const buffer = Buffer.from(await wav.arrayBuffer());
 	await fs.promises.writeFile(speechFile, buffer);
-	//console.log("Audiofile is successfully saved:", speechFile);
+	console.log("Audiofile is successfully saved:", speechFile);
 	shouldDownloadFile = true;
 }
