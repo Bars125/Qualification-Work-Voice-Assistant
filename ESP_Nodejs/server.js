@@ -46,61 +46,33 @@ app.get('/checkVariable', (req, res) => {
 });
 
 // Обработчик для загрузки файла
-app.get('/downloadAudio', (req, res) => {
-	//const filePath = path.join(__dirname, 'audio', 'audiofile.wav'); // Укажите путь к вашему аудиофайлу
+app.get('/broadcastAudio', (req, res) => {
+	//const filePath = path.join(__dirname, 'your_audio_file.wav');
 
-	const stat = fs.statSync(speechFile);
-	const fileSize = stat.size;
-	const range = req.headers.range;
-
-	if (range) {
-		console.log("RANGE!");
-		const parts = range.replace(/bytes=/, "").split("-");
-		const start = parseInt(parts[0], 10);
-		const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-		if (start >= fileSize) {
-			res.status(416).send('Requested range not satisfiable\n' + start + ' >= ' + fileSize);
+	fs.stat(speechFile, (err, stats) => {
+		if (err) {
+			console.error('File not found');
+			res.sendStatus(404);
 			return;
 		}
 
-		const chunksize = (end - start) + 1;
-		const file = fs.createReadStream(speechFile, { start, end });
-		const head = {
-			'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-			'Accept-Ranges': 'bytes',
-			'Content-Length': chunksize,
+		res.writeHead(200, {
 			'Content-Type': 'audio/wav',
-		};
-
-		res.writeHead(206, head);
-		file.pipe(res);
-
-		// Закрываем соединение после отправки файла
-		file.on('close', () => {
-			res.end();
-		});
-	} else {
-		console.log("NOT RANGE!");
-		const head = {
-			'Content-Length': fileSize,
-			'Content-Type': 'audio/wav',
-		};
-		res.writeHead(200, head);
-		const fileStream = fs.createReadStream(speechFile);
-
-		fileStream.pipe(res);
-
-		// Закрываем соединение после отправки файла
-		fileStream.on('end', () => {
-			res.end();
+			'Content-Length': stats.size
 		});
 
-		fileStream.on('error', (err) => {
-			console.error('Error reading file:', err);
-			res.status(500).end();
+		const readStream = fs.createReadStream(speechFile);
+		readStream.pipe(res);
+		
+		readStream.on('end', () => {
+			console.log('File has been sent successfully');
 		});
-	}
+
+		readStream.on('error', (err) => {
+			console.error('Error reading file', err);
+			res.sendStatus(500);
+		});
+	});
 });
 
 // Запуск сервера

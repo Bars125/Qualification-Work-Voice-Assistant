@@ -51,8 +51,8 @@ bool audioIsUploaded = false;
 
 // Node Js server Adresses
 const char *serverUploadUrl = "http://192.168.0.15:3000/uploadAudio";
-const char *serverDownloadUrl = "http://192.168.0.15:3000/downloadAudio";
-const char *checkDownloadUrl = "http://192.168.0.15:3000/checkVariable";
+const char *serverBroadcastUrl = "http://192.168.0.15:3000/broadcastAudio";
+const char *broadcastPermitionUrl = "http://192.168.0.15:3000/checkVariable";
 
 // Prototypes
 void SPIFFSInit();
@@ -64,13 +64,13 @@ void wifiConnect(void *pvParameters);
 void semaphoreWait(void *arg);
 void uploadFile();
 void i2sInitMax98357A();
-void downloadFile(void *arg);
+void broadcastAudio(void *arg);
 void monitorMemory();
+void printSpaceInfo();
 
 //  Service Func
 // void format_Spiffs();
 // void listFiles();
-void printSpaceInfo();
 
 void setup()
 {
@@ -384,8 +384,6 @@ void uploadFile()
 
   // Освобождение I2S ресурсов
   i2s_driver_uninstall(I2S_NUM_0);
-  // DEBUG
-  printSpaceInfo();
 }
 
 void semaphoreWait(void *arg)
@@ -395,17 +393,15 @@ void semaphoreWait(void *arg)
   {
     if (audioIsUploaded && isWIFIConnected)
     {
-      http.begin("http://192.168.0.15:3000/checkVariable");
+      http.begin(broadcastPermitionUrl);
       int httpResponseCode = http.GET();
       if (httpResponseCode > 0)
       {
         String payload = http.getString();
         // Serial.println("Payload Value- "+ payload);
         if (payload == "true" && xSemaphoreTake(i2sFinishedSemaphore, 0) == pdTRUE)
-        { // Если семафор доступен
-          Serial.println("Starting downloadFile ");
-          TickDelay(100);
-          xTaskCreate(downloadFile, "downloadFile", 4096, NULL, 2, NULL);
+        {
+          xTaskCreate(broadcastAudio, "broadcastAudio", 4096, NULL, 2, NULL);
           http.end();
           break;
         }
@@ -426,55 +422,35 @@ void semaphoreWait(void *arg)
   vTaskDelete(NULL);
 }
 
-void downloadFile(void *arg)
+void broadcastAudio(void *arg)
 {
   // Initialisation first
   i2sInitMax98357A();
 
   HTTPClient http;
-  http.begin(serverDownloadUrl);
-  int httpCode = http.GET();
+  http.begin(serverBroadcastUrl);
 
+  int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK)
   {
     WiFiClient *stream = http.getStreamPtr();
     uint8_t buffer[MAX_I2S_READ_LEN];
-    int bytesRead;
-    size_t totalBytesRead = 0;
 
-    while (stream->connected())
+    Serial.println("Starting broadcastAudio ");
+    while (stream->connected() || stream->available())
     {
-      bytesRead = stream->readBytes(buffer, MAX_I2S_READ_LEN);
-      if (bytesRead != MAX_I2S_READ_LEN || bytesRead == 0)
+      int len = stream->read(buffer, sizeof(buffer));
+      if (len > 0)
       {
-        Serial.println("End of file or connection closed");
-        break;
+        size_t bytes_written;
+        i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
       }
-      size_t bytes_written = 0;
-      i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, bytesRead, &bytes_written, portMAX_DELAY);
-      totalBytesRead += bytes_written;
-
-      // Вызов yield() для сброса сторожевого таймера и передачи управления другим задачам
-      yield();
     }
-
-    // Очищаем буферы
-    Serial.println("clear buff memset");
-    memset(buffer, 0, sizeof(buffer));
-
-    // Вывод уведомления о завершении воспроизведения, если все байты прочитаны
-    if (totalBytesRead == http.getSize())
-    {
-      Serial.println("Playback finished!");
-    }
-    else
-    {
-      Serial.println("Playback interrupted!");
-    }
+    Serial.println("Audio playback completed");
   }
   else
   {
-    Serial.printf("HTTP GET request failed with error code: %d\n", httpCode);
+    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
 
   http.end();
