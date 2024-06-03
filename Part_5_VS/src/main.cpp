@@ -81,7 +81,7 @@ void setup()
   pinMode(isAudioRecording, OUTPUT);
   digitalWrite(isAudioRecording, LOW);
 
-  // SPIFFSInit();
+  SPIFFSInit();
   i2sInitINMP441();
   i2sFinishedSemaphore = xSemaphoreCreateBinary();
   xTaskCreate(i2s_adc, "i2s_adc", 4096, NULL, 2, NULL);
@@ -165,73 +165,46 @@ void i2s_adc_data_scale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
 
 void i2s_adc(void *arg)
 {
-  // unsigned long previousMillis = 0;
-  // const long interval = 10000; // wait button click
-  while (true)
+
+  int i2s_read_len = I2S_READ_LEN;
+  int flash_wr_size = 0;
+  size_t bytes_read;
+
+  char *i2s_read_buff = (char *)calloc(i2s_read_len, sizeof(char));
+  uint8_t *flash_write_buff = (uint8_t *)calloc(i2s_read_len, sizeof(char));
+
+  i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+  i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+
+  digitalWrite(isAudioRecording, HIGH);
+  Serial.println(" *** Recording Start *** ");
+  while (flash_wr_size < FLASH_RECORD_SIZE)
   {
-    // if (millis() - previousMillis > interval)
-    //{
-    //   previousMillis = millis();
-    if (digitalRead(Button_Pin) == HIGH && WiFi.status() == WL_CONNECTED)
-    {
-      TickDelay(100); // reduce button rattling
-      Serial.println("Recording Started!");
-      digitalWrite(isAudioRecording, HIGH);
+    // read data from I2S bus, in this case, from ADC.
+    i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
 
-      HTTPClient http;
-      http.begin(serverUploadUrl);
-      while (digitalRead(Button_Pin) == HIGH)
-      {
-        uint8_t audio_buffer[1024];
-        size_t bytes_read;
-        i2s_read(I2S_NUM_0, audio_buffer, sizeof(audio_buffer), &bytes_read, portMAX_DELAY);
+    // save original data from I2S(ADC) into flash.
+    i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, i2s_read_len);
+    file.write((const byte *)flash_write_buff, i2s_read_len);
+    flash_wr_size += i2s_read_len;
+    ets_printf("Sound recording %u%%\n", flash_wr_size * 100 / FLASH_RECORD_SIZE);
+    ets_printf("Never Used Stack Size: %u\n", uxTaskGetStackHighWaterMark(NULL));
+  }
 
-        if (WiFi.status() == WL_CONNECTED)
-        {
-          String boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-          String contentType = "multipart/form-data; boundary=" + boundary;
-          http.addHeader("Content-Type", contentType);
+  file.close();
 
-          String bodyStart = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
-          String bodyEnd = "\r\n--" + boundary + "--\r\n";
+  digitalWrite(isAudioRecording, LOW);
 
-          String requestBody = bodyStart;
-          requestBody.concat((const char *)audio_buffer, bytes_read);
-          requestBody.concat(bodyEnd);
+  free(i2s_read_buff);
+  i2s_read_buff = NULL;
+  free(flash_write_buff);
+  flash_write_buff = NULL;
 
-          http.addHeader("Content-Length", String(requestBody.length()));
+  listSPIFFS();
 
-          // Соединяемся с сервером и отправляем запрос
-          int httpResponseCode = http.POST(requestBody);
-          if (httpResponseCode == HTTP_CODE_OK)
-          {
-            // Получаем ответ сервера
-            String response = http.getString();
-            Serial.println("Response from server: " + response);
-          }
-          else
-          {
-            Serial.println("Error during POST request. Response code: " + String(httpResponseCode));
-          }
-        }
-        else
-        {
-          Serial.println("Wifi err while recording audio...");
-        }
-      }
-      http.end();
-      digitalWrite(isAudioRecording, LOW);
-      Serial.println("Recording finished");
-      break;
-    }
-    // }
-    // else
-    // {
-    //   Serial.println("Start sleep. The Button wasn't pressed");
-    //   esp_deep_sleep_start();
-    // }
-
-    vTaskDelay(250); // check button state every 250 ms
+  if (isWIFIConnected)
+  {
+    uploadFile();
   }
 
   xSemaphoreGive(i2sFinishedSemaphore); // После завершения задачи i2s_adc отдаем семафор
@@ -419,7 +392,7 @@ void semaphoreWait(void *arg)
       if (httpResponseCode > 0)
       {
         String payload = http.getString();
-        // Serial.println("Payload Value- " + payload);
+        //Serial.println("Payload Value- " + payload);
 
         if (payload.indexOf("\"ready\":true") > -1)
         {
@@ -493,8 +466,8 @@ void i2sInitMax98357A()
 {
   i2s_config_t i2s_config = {
       .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-      .sample_rate = MAX_I2S_SAMPLE_RATE,
-      .bits_per_sample = i2s_bits_per_sample_t(MAX_I2S_SAMPLE_BITS),
+      .sample_rate = 12000,
+      .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,

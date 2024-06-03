@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const OpenAI = require('openai');
 const config = require('./config');
-const multer = require('multer');
 
 // Инициализация express
 const app = express();
@@ -24,43 +23,21 @@ const openai = new OpenAI();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Конфигурация Multer для сохранения файла по указанному пути
-// const storage = multer.diskStorage({
-// 	destination: (req, file, cb) => {
-// 		cb(null, path.dirname(recordingFile)); // Папка, где будет сохраняться файл
-// 		console.log('RECORDDIRECTORY' + path.basename(recordingFile));
-// 	},
-// 	filename: (req, file, cb) => {
-// 		cb(null, path.basename(recordingFile)); // Фиксированное имя файла
-// 		console.log('RECORDFILENAME' + path.basename(recordingFile));
-// 	}
-// });
-
-const storage = multer.diskStorage({
-	destination: (req, file, cb) => {
-	  cb(null, 'resources/');
-	},
-	filename: (req, file, cb) => {
-	  cb(null, 'recording.wav'); // Сохранение с фиксированным именем
-	}
-  });
-
-const upload = multer({ storage: storage });
-
 // Обработчик для загрузки аудио файла
-app.post('/uploadAudio', upload.single('recording'), (req, res) => {
-	console.log('File received:', req.file);
-	res.send('File uploaded successfully!');
+app.post('/uploadAudio', (req, res) => {
+	shouldDownloadFile = false;
+	var recordingFile = fs.createWriteStream(recordingFile, { encoding: "utf8" });
 
-	req.on('end', async function () {
-		try {
-			const transcription = await speechToTextAPI();
-			res.status(200).send(transcription);
-			await callGPT(transcription);
-		} catch (error) {
-			console.error("Error during processing:", error);
-			res.status(500).send("Error during processing");
-		}
+	req.on("data", function (data) {
+		recordingFile.write(data);
+	});
+
+	req.on("end", async function () {
+		recordingFile.end();
+		const transcription = await speechToTextAPI();
+		res.status(200).send(transcription);
+		// Отправка транскрипции в API GPT-3.5 Turbo
+		callGPT(transcription);
 	});
 });
 
@@ -108,9 +85,10 @@ async function speechToTextAPI() {
 	const transcription = await openai.audio.transcriptions.create({
 		file: fs.createReadStream(recordingFile),
 		model: "whisper-1",
+		response_format: "text"
 	});
 
-	console.log(`YOU: ${transcription.text}`);
+	console.log(`YOU: ${transcription}`);
 	return transcription;
 }
 
