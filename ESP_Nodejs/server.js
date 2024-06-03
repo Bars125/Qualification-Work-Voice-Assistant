@@ -9,8 +9,8 @@ const app = express();
 const port = 3000;
 
 // Пути к файлам
-const fileName = path.resolve("./resources/recording.wav");
-const speechFile = path.resolve("./resources/voicedby.wav");
+const recordingFile = path.resolve("./resources/recording.wav");
+const voicedFile = path.resolve("./resources/voicedby.wav");
 
 // API ключ
 const apiKey = config.apiKey;
@@ -26,7 +26,7 @@ app.use(express.json());
 // Обработчик для загрузки аудио файла
 app.post('/uploadAudio', (req, res) => {
 	shouldDownloadFile = false;
-	var recordingFile = fs.createWriteStream(fileName, { encoding: "utf8" });
+	var recordingFile = fs.createWriteStream(recordingFile, { encoding: "utf8" });
 
 	req.on("data", function (data) {
 		recordingFile.write(data);
@@ -50,7 +50,7 @@ app.get('/checkVariable', (req, res) => {
 app.get('/broadcastAudio', (req, res) => {
 	//const filePath = path.join(__dirname, 'your_audio_file.wav');
 
-	fs.stat(speechFile, (err, stats) => {
+	fs.stat(voicedFile, (err, stats) => {
 		if (err) {
 			console.error('File not found');
 			res.sendStatus(404);
@@ -62,7 +62,7 @@ app.get('/broadcastAudio', (req, res) => {
 			'Content-Length': stats.size
 		});
 
-		const readStream = fs.createReadStream(speechFile);
+		const readStream = fs.createReadStream(voicedFile);
 		readStream.pipe(res);
 
 		readStream.on('end', () => {
@@ -82,33 +82,12 @@ app.listen(port, () => {
 });
 
 async function speechToTextAPI() {
-	// Imports the Google Cloud client library
-	const speech = require("@google-cloud/speech");
+	const transcription = await openai.audio.transcriptions.create({
+		file: fs.createReadStream(recordingFile),
+		model: "whisper-1",
+		response_format: "text"
+	});
 
-	// Creates a client
-	const client = new speech.SpeechClient();
-
-	// Reads a local audio file and converts it to base64
-	const file = fs.readFileSync(fileName);
-	const audioBytes = file.toString("base64");
-
-	// The audio file's encoding, sample rate in hertz, and BCP-47 language code
-	const audio = {
-		content: audioBytes
-	};
-	const config = {
-		encoding: "LINEAR16",
-		sampleRateHertz: 16000,
-		languageCode: "en-US"
-	};
-	const request = {
-		audio: audio,
-		config: config
-	};
-
-	// Detects speech in the audio file
-	const [response] = await client.recognize(request);
-	const transcription = response.results.map((result) => result.alternatives[0].transcript).join("\n");
 	console.log(`YOU: ${transcription}`);
 	return transcription;
 }
@@ -154,9 +133,9 @@ async function GptResponsetoSpeech(gptResponse) {
 		});
 
 		const buffer = Buffer.from(await wav.arrayBuffer());
-		await fs.promises.writeFile(speechFile, buffer);
+		await fs.promises.writeFile(voicedFile, buffer);
 
-		//console.log("Audio file is successfully saved:", speechFile);
+		//console.log("Audio file is successfully saved:", voicedFile);
 		shouldDownloadFile = true;
 	} catch (error) {
 		console.error("Error saving audio file:", error);
