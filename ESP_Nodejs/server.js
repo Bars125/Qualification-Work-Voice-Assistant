@@ -1,38 +1,40 @@
+// include libs
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const OpenAI = require('openai');
 const config = require('./config');
 
-// Инициализация express
+// Init express
 const app = express();
 const port = 3000;
 
-// Пути к файлам
-const recordingFile = path.resolve("./resources/recording.wav");
+// Path to files
+const recordFile = path.resolve("./resources/recording.wav");
 const voicedFile = path.resolve("./resources/voicedby.wav");
 
-// API ключ
+// API Key
 const apiKey = config.apiKey;
 let shouldDownloadFile = false;
+const maxTokens = 30; 			// defines the length of GPT response
 
-// Инициализация OpenAI
+// Init OpenAI
 const openai = new OpenAI();
 
-// Middleware для обработки данных в формате multipart/form-data
+// Middleware for data processing in a "multipart/form-data" format 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Обработчик для загрузки аудио файла
+// Handler for loading an audio file
 app.post('/uploadAudio', (req, res) => {
 	shouldDownloadFile = false;
-	var recordingFile = fs.createWriteStream(recordingFile, { encoding: "utf8" });
+	var recordingFile = fs.createWriteStream(recordFile, { encoding: "utf8" });
 
-	req.on("data", function (data) {
+	req.on('data', function (data) {
 		recordingFile.write(data);
 	});
 
-	req.on("end", async function () {
+	req.on('end', async function () {
 		recordingFile.end();
 		const transcription = await speechToTextAPI();
 		res.status(200).send(transcription);
@@ -41,14 +43,13 @@ app.post('/uploadAudio', (req, res) => {
 	});
 });
 
-// Обработчик для проверки значения переменной
+// Handler for checking the value of a variable
 app.get('/checkVariable', (req, res) => {
 	res.json({ ready: shouldDownloadFile });
 });
 
-// Обработчик для загрузки файла
+// File upload handler
 app.get('/broadcastAudio', (req, res) => {
-	//const filePath = path.join(__dirname, 'your_audio_file.wav');
 
 	fs.stat(voicedFile, (err, stats) => {
 		if (err) {
@@ -66,7 +67,7 @@ app.get('/broadcastAudio', (req, res) => {
 		readStream.pipe(res);
 
 		readStream.on('end', () => {
-			console.log('File has been sent successfully');
+			//console.log('File has been sent successfully');
 		});
 
 		readStream.on('error', (err) => {
@@ -76,20 +77,26 @@ app.get('/broadcastAudio', (req, res) => {
 	});
 });
 
-// Запуск сервера
+// Starting the server
 app.listen(port, () => {
 	console.log(`Server running at http://localhost:${port}/`);
 });
 
 async function speechToTextAPI() {
-	const transcription = await openai.audio.transcriptions.create({
-		file: fs.createReadStream(recordingFile),
-		model: "whisper-1",
-		response_format: "text"
-	});
+	try {
+		const transcription = await openai.audio.transcriptions.create({
+			file: fs.createReadStream(recordFile),
+			model: "whisper-1",
+			response_format: "text"
+		});
 
-	console.log(`YOU: ${transcription}`);
-	return transcription;
+		console.log('');
+		console.log('YOU:', transcription);
+		return transcription;
+	} catch (error) {
+		console.error('Error in speechToTextAPI:', error.message);
+		return null;
+	}
 }
 
 async function callGPT(text) {
@@ -104,7 +111,7 @@ async function callGPT(text) {
 		const completion = await openai.chat.completions.create({
 			messages: [message],
 			model: "gpt-3.5-turbo",
-			max_tokens: 25
+			max_tokens: maxTokens 
 		}, {
 			headers: {
 				'Content-Type': 'application/json',

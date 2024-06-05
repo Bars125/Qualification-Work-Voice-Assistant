@@ -370,7 +370,8 @@ void uploadFile()
   }
   else
   {
-    Serial.println("Error");
+    Serial.println("Server is not available... Deep sleep.");
+    esp_deep_sleep_start();
   }
   file.close();
   client.end();
@@ -392,7 +393,7 @@ void semaphoreWait(void *arg)
       if (httpResponseCode > 0)
       {
         String payload = http.getString();
-        //Serial.println("Payload Value- " + payload);
+        // Serial.println("Payload Value- " + payload);
 
         if (payload.indexOf("\"ready\":true") > -1)
         {
@@ -410,6 +411,8 @@ void semaphoreWait(void *arg)
       {
         Serial.print("HTTP request failed with error code: ");
         Serial.println(httpResponseCode);
+        Serial.println("Start sleep.");
+        esp_deep_sleep_start();
       }
       xSemaphoreGive(i2sFinishedSemaphore);
       http.end();
@@ -435,7 +438,7 @@ void broadcastAudio(void *arg)
     uint8_t buffer[MAX_I2S_READ_LEN];
 
     Serial.println("Starting broadcastAudio ");
-    while (stream->connected() && stream->available()) // CHANGED FROM ||
+    while (stream->connected() && stream->available())
     {
       int len = stream->read(buffer, sizeof(buffer));
       if (len > 0)
@@ -457,7 +460,7 @@ void broadcastAudio(void *arg)
   i2s_driver_uninstall(MAX_I2S_NUM);
 
   // Going to sleep
-  Serial.println("Going to sleep");
+  Serial.println("Going to sleep after broadcsting");
   esp_deep_sleep_start();
   vTaskDelete(NULL); // in case deepsleepfunc doesn't work properly
 }
@@ -466,8 +469,8 @@ void i2sInitMax98357A()
 {
   i2s_config_t i2s_config = {
       .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-      .sample_rate = 12000,
-      .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+      .sample_rate = MAX_I2S_SAMPLE_RATE,
+      .bits_per_sample = i2s_bits_per_sample_t(MAX_I2S_SAMPLE_BITS),
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
