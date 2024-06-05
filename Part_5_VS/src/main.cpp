@@ -370,7 +370,8 @@ void uploadFile()
   }
   else
   {
-    Serial.println("Error");
+    Serial.println("Server is not available... Deep sleep.");
+    esp_deep_sleep_start();
   }
   file.close();
   client.end();
@@ -392,7 +393,7 @@ void semaphoreWait(void *arg)
       if (httpResponseCode > 0)
       {
         String payload = http.getString();
-        //Serial.println("Payload Value- " + payload);
+        // Serial.println("Payload Value- " + payload);
 
         if (payload.indexOf("\"ready\":true") > -1)
         {
@@ -410,6 +411,8 @@ void semaphoreWait(void *arg)
       {
         Serial.print("HTTP request failed with error code: ");
         Serial.println(httpResponseCode);
+        Serial.println("Start sleep.");
+        esp_deep_sleep_start();
       }
       xSemaphoreGive(i2sFinishedSemaphore);
       http.end();
@@ -435,7 +438,7 @@ void broadcastAudio(void *arg)
     uint8_t buffer[MAX_I2S_READ_LEN];
 
     Serial.println("Starting broadcastAudio ");
-    while (stream->connected() && stream->available()) // CHANGED FROM ||
+    while (stream->connected() && stream->available())
     {
       int len = stream->read(buffer, sizeof(buffer));
       if (len > 0)
@@ -457,7 +460,7 @@ void broadcastAudio(void *arg)
   i2s_driver_uninstall(MAX_I2S_NUM);
 
   // Going to sleep
-  Serial.println("Going to sleep");
+  Serial.println("Going to sleep after broadcsting");
   esp_deep_sleep_start();
   vTaskDelete(NULL); // in case deepsleepfunc doesn't work properly
 }
