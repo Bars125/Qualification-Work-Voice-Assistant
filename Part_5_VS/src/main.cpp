@@ -57,12 +57,13 @@ const char *broadcastPermitionUrl = "http://192.168.0.15:3000/checkVariable";
 void SPIFFSInit();
 void listSPIFFS(void);
 void i2sInitINMP441();
-void wavHeader(byte *header, int wavSize);
-void i2s_adc(void *arg);
-void wifiConnect(void *pvParameters);
-void semaphoreWait(void *arg);
-void uploadFile();
 void i2sInitMax98357A();
+void wifiConnect(void *pvParameters);
+void I2SAudioRecord(void *arg);
+void I2SAudioRecord_dataScale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len);
+void wavHeader(byte *header, int wavSize);
+void uploadFile();
+void semaphoreWait(void *arg);
 void broadcastAudio(void *arg);
 void printSpaceInfo();
 
@@ -84,7 +85,7 @@ void setup()
   SPIFFSInit();
   i2sInitINMP441();
   i2sFinishedSemaphore = xSemaphoreCreateBinary();
-  xTaskCreate(i2s_adc, "i2s_adc", 4096, NULL, 2, NULL);
+  xTaskCreate(I2SAudioRecord, "I2SAudioRecord", 4096, NULL, 2, NULL);
   TickDelay(500);
   xTaskCreate(wifiConnect, "wifi_Connect", 2048, NULL, 1, NULL);
   TickDelay(500);
@@ -151,7 +152,7 @@ void i2sInitINMP441()
   i2s_set_pin(I2S_PORT, &pin_config);
 }
 
-void i2s_adc_data_scale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
+void I2SAudioRecord_dataScale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
 {
   uint32_t j = 0;
   uint32_t dac_value = 0;
@@ -163,7 +164,7 @@ void i2s_adc_data_scale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
   }
 }
 
-void i2s_adc(void *arg)
+void I2SAudioRecord(void *arg)
 {
 
   int i2s_read_len = I2S_READ_LEN;
@@ -184,7 +185,7 @@ void i2s_adc(void *arg)
     i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
 
     // save original data from I2S(ADC) into flash.
-    i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, i2s_read_len);
+    I2SAudioRecord_dataScale(flash_write_buff, (uint8_t *)i2s_read_buff, i2s_read_len);
     file.write((const byte *)flash_write_buff, i2s_read_len);
     flash_wr_size += i2s_read_len;
     ets_printf("Sound recording %u%%\n", flash_wr_size * 100 / FLASH_RECORD_SIZE);
@@ -207,7 +208,7 @@ void i2s_adc(void *arg)
     uploadFile();
   }
 
-  xSemaphoreGive(i2sFinishedSemaphore); // После завершения задачи i2s_adc отдаем семафор
+  xSemaphoreGive(i2sFinishedSemaphore); // После завершения задачи I2SAudioRecord отдаем семафор
   vTaskDelete(NULL);
 }
 
