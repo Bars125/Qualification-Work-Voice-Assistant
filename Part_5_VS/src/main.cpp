@@ -82,12 +82,12 @@ void setup()
   pinMode(isAudioRecording, OUTPUT);
   digitalWrite(isAudioRecording, LOW);
 
-  SPIFFSInit();
+  //SPIFFSInit();
   i2sInitINMP441();
   i2sFinishedSemaphore = xSemaphoreCreateBinary();
-  xTaskCreate(I2SAudioRecord, "I2SAudioRecord", 4096, NULL, 2, NULL);
+  xTaskCreate(wifiConnect, "wifi_Connect", 2048, NULL, 2, NULL);
   TickDelay(500);
-  xTaskCreate(wifiConnect, "wifi_Connect", 2048, NULL, 1, NULL);
+  xTaskCreate(I2SAudioRecord, "I2SAudioRecord", 4096, NULL, 1, NULL);
   TickDelay(500);
   xTaskCreate(semaphoreWait, "semaphoreWait", 2048, NULL, 0, NULL);
 }
@@ -166,47 +166,72 @@ void I2SAudioRecord_dataScale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
 
 void I2SAudioRecord(void *arg)
 {
-
-  int i2s_read_len = I2S_READ_LEN;
-  int flash_wr_size = 0;
-  size_t bytes_read;
-
-  char *i2s_read_buff = (char *)calloc(i2s_read_len, sizeof(char));
-  uint8_t *flash_write_buff = (uint8_t *)calloc(i2s_read_len, sizeof(char));
-
-  i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
-  i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
-
-  digitalWrite(isAudioRecording, HIGH);
-  Serial.println(" *** Recording Start *** ");
-  while (flash_wr_size < FLASH_RECORD_SIZE)
-  {
-    // read data from I2S bus, in this case, from ADC.
-    i2s_read(I2S_PORT, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
-
-    // save original data from I2S(ADC) into flash.
-    I2SAudioRecord_dataScale(flash_write_buff, (uint8_t *)i2s_read_buff, i2s_read_len);
-    file.write((const byte *)flash_write_buff, i2s_read_len);
-    flash_wr_size += i2s_read_len;
-    ets_printf("Sound recording %u%%\n", flash_wr_size * 100 / FLASH_RECORD_SIZE);
-    ets_printf("Never Used Stack Size: %u\n", uxTaskGetStackHighWaterMark(NULL));
+  while(WiFi.status() != WL_CONNECTED){
+    Serial.println("...WiFi.status != WL_CONNECTED...");
+    TickDelay(200);
   }
 
-  file.close();
+  // Send data to server via HTTP POST
+  HTTPClient http;
+  http.begin(serverUploadUrl);
+  http.addHeader("Content-Type", "application/octet-stream");
+
+  const int bufferSize = 1024;
+  uint8_t i2sData[bufferSize];
+
+  unsigned long previousMillis = 0;
+  const long interval = 5000; // интервал в миллисекундах (5 секунд)
+
+  digitalWrite(isAudioRecording, HIGH);
+
+  // Read data from I2S
+  while (1)
+  {
+    unsigned long currentMillis = millis();
+
+    if (currentMillis - previousMillis >= interval)
+    {
+      previousMillis = currentMillis;
+
+      // recording
+      size_t bytesRead;
+      i2s_read(I2S_PORT, &i2sData, bufferSize, &bytesRead, portMAX_DELAY);
+
+      // Send data to server via HTTP POST
+      int httpResponseCode = http.sendRequest("POST", i2sData, bytesRead);
+
+      if (httpResponseCode > 0)
+      {
+        String response = http.getString();
+        Serial.println(httpResponseCode);
+        Serial.println(response);
+      }
+      else
+      {
+        Serial.print("Error on sending POST: ");
+        Serial.println(httpResponseCode);
+      }
+    }
+  }
+  // file.write((const byte *)flash_write_buff, i2s_read_len);
+  // flash_wr_size += i2s_read_len;
+  // ets_printf("Sound recording %u%%\n", flash_wr_size * 100 / FLASH_RECORD_SIZE);
+  // ets_printf("Never Used Stack Size: %u\n", uxTaskGetStackHighWaterMark(NULL));
 
   digitalWrite(isAudioRecording, LOW);
 
-  free(i2s_read_buff);
-  i2s_read_buff = NULL;
-  free(flash_write_buff);
-  flash_write_buff = NULL;
+  // free(i2s_read_buff);
+  // i2s_read_buff = NULL;
+  // free(flash_write_buff);
+  // flash_write_buff = NULL;
 
-  listSPIFFS();
+  // listSPIFFS();
 
-  if (isWIFIConnected)
-  {
-    uploadFile();
-  }
+  // if (isWIFIConnected)
+  // {
+  //   uploadFile();
+  // }
+  Serial.println("Recording seinding finished successfuly!");
 
   xSemaphoreGive(i2sFinishedSemaphore); // После завершения задачи I2SAudioRecord отдаем семафор
   vTaskDelete(NULL);

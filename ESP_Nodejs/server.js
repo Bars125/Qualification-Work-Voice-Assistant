@@ -4,34 +4,61 @@ const fs = require('fs');
 const path = require('path');
 const OpenAI = require('openai');
 const config = require('./config');
+const multer = require('multer');
 
 // Init express
 const app = express();
 const port = 3000;
 
+// Путь для сохранения файлов
+const uploadDir = path.join(__dirname, 'resources');
+const fileName = 'recording.wav'; // Константное имя файла
+
+// Настройка multer для загрузки файла
+const storage = multer.diskStorage({
+	destination: function (req, file, cb) {
+		cb(null, uploadDir);
+	},
+	filename: function (req, file, cb) {
+		cb(null, fileName);
+	}
+});
+const upload = multer({ storage: storage });
+
 // Path to files
-const recordFile = path.resolve("./resources/recording.wav");
+//const recordFile = path.resolve("./resources/recording.wav");
 const voicedFile = path.resolve("./resources/voicedby.wav");
 
 // API Key
 const apiKey = config.apiKey;
 let shouldDownloadFile = false;
-const maxTokens = 30; 			// defines the length of GPT response
+const maxTokens = 60; 			// defines the length of GPT response
 
 // Init OpenAI
 const openai = new OpenAI();
 
-// Middleware for data processing in a "multipart/form-data" format 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-
 // Handler for loading an audio file
-app.post('/uploadAudio', (req, res) => {
+app.post('/uploadAudio', upload.single('file'), (req, res) => {
 	shouldDownloadFile = false;
-	var recordingFile = fs.createWriteStream(recordFile, { encoding: "utf8" });
+	console.log('Received file upload');
 
-	req.on('data', function (data) {
-		recordingFile.write(data);
+	// Проверяем, загрузился ли файл
+	if (!req.file) {
+		return res.status(400).send('No file uploaded');
+	}
+
+	// Путь к загруженному файлу
+	const filePath = path.join(uploadDir, fileName);
+
+	// Записываем файл на диск
+	fs.writeFile(filePath, req.file.buffer, (err) => {
+		if (err) {
+			console.error('Error saving file:', err);
+			return res.status(500).send('Error uploading file');
+		}
+
+		console.log('File saved:', filePath);
+		res.status(200).send('File uploaded successfully');
 	});
 
 	req.on('end', async function () {
@@ -111,7 +138,7 @@ async function callGPT(text) {
 		const completion = await openai.chat.completions.create({
 			messages: [message],
 			model: "gpt-3.5-turbo",
-			max_tokens: maxTokens 
+			max_tokens: maxTokens
 		}, {
 			headers: {
 				'Content-Type': 'application/json',
