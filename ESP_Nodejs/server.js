@@ -1,3 +1,9 @@
+/**
+ * @brief Voice assistant. Server side NodeJS.
+ * @author Yurii Mykhailov
+ * @copyright GPLv3
+ */
+
 // include libs
 const express = require('express');
 const fs = require('fs');
