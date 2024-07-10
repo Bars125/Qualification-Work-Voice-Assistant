@@ -1,3 +1,9 @@
+/**
+ * @brief Voice assistant. Client side ESP32.
+ * @author Yurii Mykhailov
+ * @copyright GPLv3
+ */
+
 // Libraries
 #include <driver/i2s.h>
 #include <SPIFFS.h>
