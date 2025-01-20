@@ -4,3 +4,24 @@ The NodeJS Server monitors input request, when there is, saves the data to the s
 Some ESP32 C++ code was taken from That Project guy. Really appreciate it.
 
 URL: https://www.youtube.com/watch?v=qmruNKeIN-o
+
+IMPORTANT DETAILS TO MAKE THE PROJECT WORK
+
+1. The API-key is stored in the "config.js" file:
+// config.js
+const apiKey = 'Bearer XXX';
+module.exports = {
+    apiKey: apiKey
+};
+
+2. You have to create a User Variable "OPENAI_API_KEY" with value "your API-key"
+![Screenshot 2025-01-19 180216](https://github.com/user-attachments/assets/99a7e414-6986-4254-96d2-beb1cf2794d8)
+
+3. The "config.h" file contains only SSID and PASS (ESP32 side)
+#ifndef NETWORK_PARAM_H
+#define NETWORK_PARAM_H
+
+#define WIFI_SSID       "Vodafone"
+#define WIFI_PASSWORD   "Pass"
+
+#endif // NETWORK_PARAM_H
